@@ -110,13 +110,33 @@ def index():
   </head>
   <body>
     <form action="{{ urlprefix }}://{{ host }}/set" method="post">
-      <dl>
-        <dt>message:
-        <dd><textarea name="message" rows=5 cols=40 autofocus="autofocus"></textarea>
-        <dt>extra:
-        <dd><input type="text" name="extra" size=30 />
-        <dd><input type="submit" value="Share" />
-      </dl>
+      <table  style="border: 0; padding: 0; border-spacing: 0;">
+        <tr>
+          <td style="vertical-align: top;">
+            <dl>
+              <dt>message:</dt>
+              <dd><textarea name="message" rows=5 cols=40 autofocus="autofocus"></textarea></dd>
+              <dt>extra:</dt>
+              <dd><input type="text" name="extra" size=30 /></dd>
+            </dl>
+          </td>
+          <td style="vertical-align: top;">
+            <dl>
+              <dt>copies:</dt>
+              <dd><input type="text" name="copies" size=10 /></dd>
+              <!--
+              <dt>views:</dt>
+              <dd><input type="text" name="views" size=10 /></dd>
+              -->
+            </dl>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <input type="submit" value="Share" />
+          </td>
+        </tr>
+      </table>
     </form>
   </body>
 </html>''', host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = 'text/html')
@@ -129,12 +149,12 @@ def get_form(arg):
   <body>
     <form action="{{ urlprefix }}://{{ host }}/get/" method="post">
       <dl>
-        <dt>id:
-        <dd><input type="text" name="arg" size=60 value="{{ msgid }}"/>
-        <dt>extra:
-        <dd><input type="text" name="extra" size=30 />
-        <dd><input type="submit" value="Retrieve" />
+        <dt>id:</dt>
+        <dd><input type="text" name="arg" size=60 value="{{ msgid }}"/></dd>
+        <dt>extra:</dt>
+        <dd><input type="text" name="extra" size=30 /></dd>
       </dl>
+      <input type="submit" value="Retrieve" />
     </form>
   </body>
 </html>''', host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg), mimetype = 'text/html')
@@ -232,23 +252,7 @@ def get_key(arg):
     else:
         return Response('No get', mimetype = 'text/plain')
 
-@app.route('/set', methods = ['POST'])
-def set_key():
-    message = request.form['message'].encode('utf-8')
-    extra = request.form.get('extra', '').encode('utf-8')
-    msglen = len(message)
-    if app.config['DEBUG']:
-        print('message: ' + message)
-        print('messagelen: ' + str(msglen))
-        print('extra: ' + str(extra))
-
-    if msglen > app.config['MINCOMPSIZE']:
-        message = '\x01' + deflate(message)
-        if app.config['DEBUG']:
-            print('compressed: ' + str(len(message)))
-    else:
-        message = '\x00' + message
-
+def set_key(message, msglen, extra, views):
     while True:
         uid = uuid.uuid4().bytes
         if not cache.get(uid):
@@ -279,12 +283,32 @@ def set_key():
             extraflag = '?'
         else:
             extraflag = ''
-        return Response('%s://%s/get/%s%s' %
-            (app.config['URLPREFIX'], request.host, extraflag, base64.urlsafe_b64encode(app.config['SERVERID'] + inttostr(urlidx, kcsize) + urliv + urlcipher.encrypt(uid)).rstrip('=')),
-            mimetype = 'text/plain'
-        )
+        return '%s://%s/get/%s%s' % (app.config['URLPREFIX'], request.host, extraflag, base64.urlsafe_b64encode(app.config['SERVERID'] + inttostr(urlidx, kcsize) + urliv + urlcipher.encrypt(uid)).rstrip('='))
     else:
-        return Response('No set', mimetype = 'text/plain')
+        return 'No set'
+
+@app.route('/set', methods = ['POST'])
+def set_keys():
+    message = request.form['message'].encode('utf-8')
+    msglen = len(message)
+    extra = request.form.get('extra', '').encode('utf-8')
+    copies = request.form.get('copies', 1, type = int)
+    views = request.form.get('views', 1, type = int)
+
+    if app.config['DEBUG']:
+        print('message: ' + message)
+        print('messagelen: ' + str(msglen))
+        print('extra: ' + str(extra))
+
+    if msglen > app.config['MINCOMPSIZE']:
+        message = '\x01' + deflate(message)
+        if app.config['DEBUG']:
+            print('compressed: ' + str(len(message)))
+    else:
+        message = '\x00' + message
+
+    result = [set_key(message, msglen, extra) for _ in xrange(copies)]
+    return Response('\n'.join(result), mimetype = 'text/plain')
 
 @app.route('/src', methods = ['GET', 'POST'])
 def get_src():
