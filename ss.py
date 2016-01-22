@@ -52,8 +52,15 @@ MINCOMPSIZE = 128
 
 MAX_CONTENT_LENGTH = 1024 * 1024
 
+DEFCOPIES = 1
 MAXCOPIES = 16
+DEFVIEWS = 1
 MAXVIEWS = 16
+EXTRASCOUNT = True
+
+GENKEYS = 1
+GENKEYLEN = 16
+GENKEYCHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
 
 # utils
 def bytesize(num):
@@ -229,7 +236,8 @@ def get_key(arg):
             return Response('Hmm', mimetype = 'text/plain')
 
         if digest != HMAC.new(extra, cryptmsg[SHA256.digest_size:], SHA256).digest():
-            dec_views(uid, msgidx, urlidx)
+            if app.config['EXTRASCOUNT']:
+                dec_views(uid, msgidx, urlidx)
             return Response('Nope', mimetype = 'text/plain')
 
         if app.config['DEBUG']:
@@ -265,7 +273,12 @@ def get_key(arg):
     else:
         return Response('No get', mimetype = 'text/plain')
 
-def set_key(message, msglen, extra, views):
+def set_key(message, extra = '', views = app.config['DEFVIEWS']):
+    if app.config['DEBUG']:
+        print('message: ' + message)
+        print('extra: ' + str(extra))
+        print('views: ' + str(views))
+
     while True:
         uid = uuid.uuid4().bytes
         # if not cache.get(uid):
@@ -311,12 +324,18 @@ def set_keys():
     message = request.form['message'].encode('utf-8')
     msglen = len(message)
     extra = request.form.get('extra', '').encode('utf-8')
-    copies = request.form.get('copies', 1, type = int)
-    if (copies < 1) or (copies > MAXCOPIES):
+
+    copies = request.form.get('copies', app.config['DEFCOPIES'], type = int)
+    if (copies < 1):
         copies = 1
-    views = request.form.get('views', 1, type = int)
-    if (views < 1) or (views > MAXVIEWS):
+    elif (copies > app.config['MAXCOPIES']):
+        copies=  app.config['MAXCOPIES']
+
+    views = request.form.get('views', app.config['DEFVIEWS'], type = int)
+    if (views < 1):
         views = 1
+    elif (views > app.config['MAXVIEWS']):
+        views = app.config['MAXVIEWS']
 
     if app.config['DEBUG']:
         print('message: ' + message)
@@ -332,8 +351,74 @@ def set_keys():
     else:
         message = '\x00' + message
 
-    result = [set_key(message, msglen, extra, views) for _ in xrange(copies)]
+    result = [set_key(message, extra, views) for _ in xrange(copies)]
     return Response('\n'.join(result), mimetype = 'text/plain')
+
+def gen_key(keycharslen, keylen, copies, views):
+    genkey = ''.join([app.config['GENKEYCHARS'][ord(c) % keycharslen] for c in Random.new().read(keylen)])
+    if keylen > app.config['MINCOMPSIZE']:
+        genkey = '\x01' + deflate(genkey)
+        if app.config['DEBUG']:
+            print('compressed: ' + str(len(genkey)))
+    else:
+        genkey = '\x00' + genkey
+
+    result = [set_key(genkey, views = views) for _ in xrange(copies)]
+    return '\n'.join(result)
+
+@app.route('/gen', methods = ['GET', 'POST'], defaults = {'count': app.config['GENKEYS'], 'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
+@app.route('/gen/', methods = ['GET', 'POST'], defaults = {'count': app.config['GENKEYS'], 'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>', methods = ['GET', 'POST'], defaults = {'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>/', methods = ['GET', 'POST'], defaults = {'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>/<int:keylen>', methods = ['GET', 'POST'], defaults = {'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>/<int:keylen>/', methods = ['GET', 'POST'], defaults = {'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>', methods = ['GET', 'POST'], defaults = {'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/', methods = ['GET', 'POST'], defaults = {'views': app.config['DEFVIEWS']})
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>', methods = ['GET', 'POST'])
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>/', methods = ['GET', 'POST'])
+def gen_keys(count, keylen, copies, views):
+    if not count:
+        count = request.form.get('count')
+        if not count or (count < 1) or (count > app.config['MAX_CONTENT_LENGTH']):
+            count = app.config['GENKEYS']
+    if app.config['DEBUG']:
+        print('count: ' + str(count))
+
+    if not keylen:
+        keylen = request.form.get('keylen')
+        if (not keylen) or (keylen < 1) or (keylen > app.config['MAX_CONTENT_LENGTH']):
+            keylen = app.config['GENKEYLEN']
+    if app.config['DEBUG']:
+        print('keylen: ' + str(keylen))
+
+    if not copies:
+        copies = request.form.get('copies')
+        if not copies:
+            copies = app.config['DEFCOPIES']
+        elif copies < 1:
+            copies = 1
+        elif copies > app.config['MAXCOPIES']:
+            copies = app.config['MAXCOPIES']
+    if app.config['DEBUG']:
+        print('copies: ' + str(copies))
+
+    if not views:
+        views = request.form.get('views')
+        if not views:
+            views = app.config['DEFVIEWS']
+        elif views < 1:
+            views = 1
+        elif views > app.config['MAXVIEWS']:
+            views = app.config['MAXVIEWS']
+    if app.config['DEBUG']:
+        print('views: ' + str(views))
+
+    keycharslen = len(app.config['GENKEYCHARS'])
+    if app.config['DEBUG']:
+        print('keycharslen: ' + str(keycharslen))
+
+    result = [gen_key(keycharslen, keylen, copies, views) for _ in xrange(count)]
+    return Response('\n\n'.join(result), mimetype = 'text/plain')
 
 @app.route('/src', methods = ['GET', 'POST'])
 def get_src():
