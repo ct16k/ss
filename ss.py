@@ -189,6 +189,7 @@ def get_form(arg):
 @app.route('/get', methods = ['GET', 'POST'], defaults = {'arg': None})
 @app.route('/get/', methods = ['GET', 'POST'], defaults = {'arg': None})
 @app.route('/get/<arg>', methods = ['GET', 'POST'])
+@app.route('/get/<arg>/', methods = ['GET', 'POST'])
 def get_key(arg):
     if not arg:
         arg = request.form.get('arg')
@@ -320,6 +321,7 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS']):
         return 'No set'
 
 @app.route('/set', methods = ['POST'])
+@app.route('/set/', methods = ['POST'])
 def set_keys():
     message = request.form['message'].encode('utf-8')
     msglen = len(message)
@@ -421,6 +423,7 @@ def gen_keys(count, keylen, copies, views):
     return Response('\n\n'.join(result), mimetype = 'text/plain')
 
 @app.route('/src', methods = ['GET', 'POST'])
+@app.route('/src/', methods = ['GET', 'POST'])
 def get_src():
     with open(__file__) as srcfile:
         return Response(''.join(line for line in srcfile), mimetype = 'text/plain')
