@@ -143,6 +143,24 @@ def index():
   </body>
 </html>''', host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = 'text/html')
 
+def dec_views(uid, msgidx, urlidx):
+    viewcount[uid] -= 1
+    if viewcount[uid] == 0:
+        cache.delete(uid)
+        viewcount.pop(uid, None)
+
+        msgkey[msgidx]['count'] -= 1
+        if msgkey[msgidx]['count'] == 0:
+            msgkey[msgidx]['key'] = Random.new().read(app.config['KEYSIZE'])
+            if app.config['DEBUG']:
+                print('msgkey[%d]: %s' % (msgidx, msgkey[msgidx]['key'].encode('hex')))
+
+        urlkey[urlidx]['count'] -= 1
+        if urlkey[urlidx]['count'] == 0:
+            urlkey[urlidx]['key'] = Random.new().read(app.config['KEYSIZE'])
+            if app.config['DEBUG']:
+                print('urlkey[%d]: %s' % (urlidx, urlkey[urlidx]['key'].encode('hex')))
+
 def get_form(arg):
     return Response(render_template_string('''<html>
   <head>
@@ -211,6 +229,7 @@ def get_key(arg):
             return Response('Hmm', mimetype = 'text/plain')
 
         if digest != HMAC.new(extra, cryptmsg[SHA256.digest_size:], SHA256).digest():
+            dec_views(uid, msgidx, urlidx)
             return Response('Nope', mimetype = 'text/plain')
 
         if app.config['DEBUG']:
@@ -225,22 +244,7 @@ def get_key(arg):
         salt, digest = struct.unpack(fmt, signedmsg[:struct.calcsize(fmt)])
         message = signedmsg[struct.calcsize(fmt):]
 
-        viewcount[uid] -= 1
-        if viewcount[uid] == 0:
-            cache.delete(uid)
-            viewcount.pop(uid, None)
-
-            msgkey[msgidx]['count'] -= 1
-            if msgkey[msgidx]['count'] == 0:
-                msgkey[msgidx]['key'] = Random.new().read(app.config['KEYSIZE'])
-                if app.config['DEBUG']:
-                    print('msgkey[%d]: %s' % (msgidx, msgkey[msgidx]['key'].encode('hex')))
-
-            urlkey[urlidx]['count'] -= 1
-            if urlkey[urlidx]['count'] == 0:
-                urlkey[urlidx]['key'] = Random.new().read(app.config['KEYSIZE'])
-                if app.config['DEBUG']:
-                    print('urlkey[%d]: %s' % (urlidx, urlkey[urlidx]['key'].encode('hex')))
+        dec_views(uid, msgidx, urlidx)
 
         if digest != HMAC.new(salt, message, SHA256).digest():
             return Response('Wot', mimetype = 'text/plain')
