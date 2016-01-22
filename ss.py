@@ -52,6 +52,9 @@ MINCOMPSIZE = 128
 
 MAX_CONTENT_LENGTH = 1024 * 1024
 
+MAXCOPIES = 16
+MAXVIEWS = 16
+
 # utils
 def bytesize(num):
     size = 0
@@ -94,6 +97,7 @@ logger = logging.getLogger('werkzeug')
 cache = None
 sidsize = len(app.config['SERVERID'])
 kcsize = bytesize(app.config['KEYCOUNT'] - 1)
+viewcount = {}
 
 msgkey = [{'key': Random.new().read(app.config['KEYSIZE']), 'count': 0} for _ in xrange(app.config['KEYCOUNT'])]
 urlkey = [{'key': Random.new().read(app.config['KEYSIZE']), 'count': 0} for _ in xrange(app.config['KEYCOUNT'])]
@@ -124,10 +128,8 @@ def index():
             <dl>
               <dt>copies:</dt>
               <dd><input type="text" name="copies" size=10 /></dd>
-              <!--
               <dt>views:</dt>
               <dd><input type="text" name="views" size=10 /></dd>
-              -->
             </dl>
           </td>
         </tr>
@@ -196,46 +198,53 @@ def get_key(arg):
     if app.config['DEBUG']:
         print('uid: ' + uid.encode('hex'))
 
-    urlkey[urlidx]['count'] -= 1
-    if urlkey[urlidx]['count'] == 0:
-        urlkey[urlidx]['key'] = Random.new().read(app.config['KEYSIZE'])
-        if app.config['DEBUG']:
-            print('urlkey[%d]: %s' % (urlidx, urlkey[urlidx]['key'].encode('hex')))
-
     cryptmsg = cache.get(uid)
     if cryptmsg:
+        if (not uid in viewcount) or (viewcount[uid] < 1):
+            return Response('Hmpf', mimetype = 'text/plain')
+
         fmt = '%ds %ds %ds' % (SHA256.digest_size, kcsize, AES.block_size)
         digest, msgidx, msgiv = struct.unpack(fmt, cryptmsg[:struct.calcsize(fmt)])
-
-        if digest != HMAC.new(extra, cryptmsg[SHA256.digest_size:], SHA256).digest():
-            return Response('Nope', mimetype = 'text/plain')
 
         msgidx = strtoint(msgidx)
         if msgkey[msgidx]['count'] < 1:
             return Response('Hmm', mimetype = 'text/plain')
 
+        if digest != HMAC.new(extra, cryptmsg[SHA256.digest_size:], SHA256).digest():
+            return Response('Nope', mimetype = 'text/plain')
+
         if app.config['DEBUG']:
+            print('views: ' + str(viewcount[uid]))
             print('msgidx: ' + str(msgidx))
             print('msgiv: ' + msgiv.encode('hex'))
 
         msgcipher = AES.new(msgkey[msgidx]['key'], AES.MODE_CFB, msgiv)
         signedmsg = msgcipher.decrypt(cryptmsg[struct.calcsize(fmt):])
 
-        msgkey[msgidx]['count'] -= 1
-        if msgkey[msgidx]['count'] == 0:
-            msgkey[msgidx]['key'] = Random.new().read(app.config['KEYSIZE'])
-            if app.config['DEBUG']:
-                print('msgkey[%d]: %s' % (msgidx, msgkey[msgidx]['key'].encode('hex')))
-
         fmt = '%ds %ds' % (SHA256.digest_size, SHA256.digest_size)
         salt, digest = struct.unpack(fmt, signedmsg[:struct.calcsize(fmt)])
         message = signedmsg[struct.calcsize(fmt):]
+
+        viewcount[uid] -= 1
+        if viewcount[uid] == 0:
+            cache.delete(uid)
+            viewcount.pop(uid, None)
+
+            msgkey[msgidx]['count'] -= 1
+            if msgkey[msgidx]['count'] == 0:
+                msgkey[msgidx]['key'] = Random.new().read(app.config['KEYSIZE'])
+                if app.config['DEBUG']:
+                    print('msgkey[%d]: %s' % (msgidx, msgkey[msgidx]['key'].encode('hex')))
+
+            urlkey[urlidx]['count'] -= 1
+            if urlkey[urlidx]['count'] == 0:
+                urlkey[urlidx]['key'] = Random.new().read(app.config['KEYSIZE'])
+                if app.config['DEBUG']:
+                    print('urlkey[%d]: %s' % (urlidx, urlkey[urlidx]['key'].encode('hex')))
+
         if digest != HMAC.new(salt, message, SHA256).digest():
             return Response('Wot', mimetype = 'text/plain')
         else:
-            if not app.config['DEBUG']:
-                cache.delete(uid)
-
             if message[0] == '\x01':
                 if 'deflate' not in request.headers.get('Accept-Encoding', '').lower():
                     return Response(inflate(message[1:]), mimetype = 'text/plain')
@@ -255,7 +264,8 @@ def get_key(arg):
 def set_key(message, msglen, extra, views):
     while True:
         uid = uuid.uuid4().bytes
-        if not cache.get(uid):
+        # if not cache.get(uid):
+        if not uid in viewcount:
             break
     if app.config['DEBUG']:
         print('uid: ' + uid.encode('hex'))
@@ -272,17 +282,22 @@ def set_key(message, msglen, extra, views):
     cryptmsg = inttostr(msgidx, kcsize) + msgiv + msgcipher.encrypt(salt) + msgcipher.encrypt(HMAC.new(salt, message, SHA256).digest()) + msgcipher.encrypt(message)
 
     if cache.set(uid, HMAC.new(extra, cryptmsg, SHA256).digest() + cryptmsg):
+        viewcount[uid] = views;
+
         urliv = Random.new().read(AES.block_size)
         urlidx = random.randint(0, app.config['KEYCOUNT'] - 1)
         if app.config['DEBUG']:
             print('urlidx: ' + str(urlidx))
             print('urliv: ' + urliv.encode('hex'))
+
         urlcipher = AES.new(urlkey[urlidx]['key'], AES.MODE_CFB, urliv)
         urlkey[urlidx]['count'] += 1
+
         if extra:
             extraflag = '?'
         else:
             extraflag = ''
+
         return '%s://%s/get/%s%s' % (app.config['URLPREFIX'], request.host, extraflag, base64.urlsafe_b64encode(app.config['SERVERID'] + inttostr(urlidx, kcsize) + urliv + urlcipher.encrypt(uid)).rstrip('='))
     else:
         return 'No set'
@@ -293,12 +308,18 @@ def set_keys():
     msglen = len(message)
     extra = request.form.get('extra', '').encode('utf-8')
     copies = request.form.get('copies', 1, type = int)
+    if (copies < 1) or (copies > MAXCOPIES):
+        copies = 1
     views = request.form.get('views', 1, type = int)
+    if (views < 1) or (views > MAXVIEWS):
+        views = 1
 
     if app.config['DEBUG']:
         print('message: ' + message)
         print('messagelen: ' + str(msglen))
         print('extra: ' + str(extra))
+        print('copies: ' + str(copies))
+        print('views: ' + str(views))
 
     if msglen > app.config['MINCOMPSIZE']:
         message = '\x01' + deflate(message)
@@ -307,7 +328,7 @@ def set_keys():
     else:
         message = '\x00' + message
 
-    result = [set_key(message, msglen, extra) for _ in xrange(copies)]
+    result = [set_key(message, msglen, extra, views) for _ in xrange(copies)]
     return Response('\n'.join(result), mimetype = 'text/plain')
 
 @app.route('/src', methods = ['GET', 'POST'])
