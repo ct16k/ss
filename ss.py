@@ -319,6 +319,7 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS']):
     else:
         return 'No set'
 
+@app.route('/set/', methods = ['POST'])
 @app.route('/set', methods = ['POST'])
 def set_keys():
     message = request.form['message'].encode('utf-8')
@@ -366,33 +367,34 @@ def gen_key(keycharslen, keylen, copies, views):
     result = [set_key(genkey, views = views) for _ in xrange(copies)]
     return '\n'.join(result)
 
-@app.route('/gen', methods = ['GET', 'POST'], defaults = {'count': app.config['GENKEYS'], 'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
-@app.route('/gen/', methods = ['GET', 'POST'], defaults = {'count': app.config['GENKEYS'], 'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>', methods = ['GET', 'POST'], defaults = {'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>/', methods = ['GET', 'POST'], defaults = {'keylen': app.config['GENKEYLEN'], 'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>/<int:keylen>', methods = ['GET', 'POST'], defaults = {'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>/<int:keylen>/', methods = ['GET', 'POST'], defaults = {'copies': app.config['DEFCOPIES'], 'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>', methods = ['GET', 'POST'], defaults = {'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/', methods = ['GET', 'POST'], defaults = {'views': app.config['DEFVIEWS']})
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>', methods = ['GET', 'POST'])
+@app.route('/gen/', methods = ['GET', 'POST'], defaults = {'count': None, 'keylen': None, 'copies': None, 'views': None})
+@app.route('/gen', methods = ['GET', 'POST'], defaults = {'count': None, 'keylen': None, 'copies': None, 'views': None})
+@app.route('/gen/<int:count>/', methods = ['GET', 'POST'], defaults = {'keylen': None, 'copies': None, 'views': None})
+@app.route('/gen/<int:count>', methods = ['GET', 'POST'], defaults = {'keylen': None, 'copies': None, 'views': None})
+@app.route('/gen/<int:count>/<int:keylen>/', methods = ['GET', 'POST'], defaults = {'copies': None, 'views': None})
+@app.route('/gen/<int:count>/<int:keylen>', methods = ['GET', 'POST'], defaults = {'copies': None, 'views': None})
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/', methods = ['GET', 'POST'], defaults = {'views': None})
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>', methods = ['GET', 'POST'], defaults = {'views': None})
 @app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>/', methods = ['GET', 'POST'])
+@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>', methods = ['GET', 'POST'])
 def gen_keys(count, keylen, copies, views):
+
     if not count:
-        count = request.form.get('count')
-        if not count or (count < 1) or (count > app.config['MAX_CONTENT_LENGTH']):
+        count = request.values.get('count', app.config['GENKEYS'], type = int)
+        if not count or (count < 1):
             count = app.config['GENKEYS']
     if app.config['DEBUG']:
         print('count: ' + str(count))
 
     if not keylen:
-        keylen = request.form.get('keylen')
+        keylen = request.values.get('keylen', app.config['GENKEYLEN'], type = int)
         if (not keylen) or (keylen < 1) or (keylen > app.config['MAX_CONTENT_LENGTH']):
             keylen = app.config['GENKEYLEN']
     if app.config['DEBUG']:
         print('keylen: ' + str(keylen))
 
     if not copies:
-        copies = request.form.get('copies')
+        copies = request.values.get('copies', app.config['DEFCOPIES'], type = int)
         if not copies:
             copies = app.config['DEFCOPIES']
         elif copies < 1:
@@ -403,7 +405,7 @@ def gen_keys(count, keylen, copies, views):
         print('copies: ' + str(copies))
 
     if not views:
-        views = request.form.get('views')
+        views = request.values.get('views', app.config['DEFVIEWS'], type = int)
         if not views:
             views = app.config['DEFVIEWS']
         elif views < 1:
@@ -420,6 +422,7 @@ def gen_keys(count, keylen, copies, views):
     result = [gen_key(keycharslen, keylen, copies, views) for _ in xrange(count)]
     return Response('\n\n'.join(result), mimetype = 'text/plain')
 
+@app.route('/src/', methods = ['GET', 'POST'])
 @app.route('/src', methods = ['GET', 'POST'])
 def get_src():
     with open(__file__) as srcfile:
