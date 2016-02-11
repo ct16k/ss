@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-Copyright (c) 2015, Theodor-Iulian Ciobanu
+Copyright (c) 2015-2016, Theodor-Iulian Ciobanu
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -34,9 +34,10 @@ import struct
 import zlib
 import base64
 import logging
+from collections import Counter
 
 from flask import Flask, request, render_template_string, Response, make_response
-from werkzeug.contrib.cache import SimpleCache
+from trivialcache import TrivialCache
 
 # default configuration
 DEBUG = False
@@ -104,7 +105,7 @@ logger = logging.getLogger('werkzeug')
 cache = None
 sidsize = len(app.config['SERVERID'])
 kcsize = bytesize(app.config['KEYCOUNT'] - 1)
-viewcount = {}
+viewcount = Counter()
 
 msgkey = [{'key': Random.new().read(app.config['KEYSIZE']), 'count': 0} for _ in xrange(app.config['KEYCOUNT'])]
 urlkey = [{'key': Random.new().read(app.config['KEYSIZE']), 'count': 0} for _ in xrange(app.config['KEYCOUNT'])]
@@ -154,7 +155,7 @@ def dec_views(uid, msgidx, urlidx):
     viewcount[uid] -= 1
     if viewcount[uid] == 0:
         cache.delete(uid)
-        viewcount.pop(uid, None)
+        del viewcount[uid]
 
         msgkey[msgidx]['count'] -= 1
         if msgkey[msgidx]['count'] == 0:
@@ -441,5 +442,5 @@ def before_request():
 		logger.info("access_route: " + ', '.join(route[-4:]))
 
 if __name__ == '__main__':
-    cache = SimpleCache(app.config['THRESHOLD'], app.config['TIMEOUT'])
+    cache = TrivialCache(app.config['THRESHOLD'], app.config['TIMEOUT'])
     app.run(host = app.config['LISTENADDR'], port = app.config['LISTENPORT'], debug = app.config['DEBUG'])
