@@ -30,112 +30,112 @@ from time import time
 import pickle
 
 class TrivialCache(object):
-	def __init__(self, threshold = 500, timeout = 300):
-		self._cache = OrderedDict()
-		self.clear = self._cache.clear
-		self._threshold = threshold
-		self._timeout = timeout
-		self._lock = RLock()
-		self.autopurge = self._setautopurge()
+    def __init__(self, threshold = 500, timeout = 300):
+        self._cache = OrderedDict()
+        self.clear = self._cache.clear
+        self._threshold = threshold
+        self._timeout = timeout
+        self._lock = RLock()
+        self.autopurge = self._setautopurge()
 
-	def size(self):
-		return len(self._cache)
+    def size(self):
+        return len(self._cache)
 
-	def has(self, key):
-		with self._lock:
-			if key in self._cache:
-				exp, _ = self._cache[key]
-				if (not exp) or (exp > time()):
-					return True
-				else:
-					self._delete(key)
+    def has(self, key):
+        with self._lock:
+            if key in self._cache:
+                exp, _ = self._cache[key]
+                if (not exp) or (exp > time()):
+                    return True
+                else:
+                    self._delete(key)
 
-			return False
+            return False
 
-	def get(self, key):
-		with self._lock:
-			if key in self._cache:
-				exp, val = self._cache[key]
-				if (not exp) or (exp > time()):
-					return pickle.loads(val)
-				else:
-					self._delete(key)
+    def get(self, key):
+        with self._lock:
+            if key in self._cache:
+                exp, val = self._cache[key]
+                if (not exp) or (exp > time()):
+                    return pickle.loads(val)
+                else:
+                    self._delete(key)
 
-			return None
+            return None
 
-	def pop(self, key):
-		with self._lock:
-			return self._cache.pop(key, None)
+    def pop(self, key):
+        with self._lock:
+            return self._cache.pop(key, None)
 
-	def set(self, key, value, timeout = None):
-		with self._lock:
-			timeout = timeout or self._timeout
-			if timeout:
-				exp = time() + timeout
-			else:
-				exp = None
+    def set(self, key, value, timeout = None):
+        with self._lock:
+            timeout = timeout or self._timeout
+            if timeout:
+                exp = time() + timeout
+            else:
+                exp = None
 
-			if len(self._cache) + (not key in self._cache) > self._threshold:
-				self.purge()
-				if len(self._cache) + (not key in self._cache) > self._threshold:
-					return False
-			else:
-				self.purge()
+            if len(self._cache) + (not key in self._cache) > self._threshold:
+                self.purge()
+                if len(self._cache) + (not key in self._cache) > self._threshold:
+                    return False
+            else:
+                self.purge()
 
-			pickled = pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
-			size = len(pickled) + 1
+            pickled = pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+            size = len(pickled) + 1
 
-			self._cache[key] = (exp, pickled)
+            self._cache[key] = (exp, pickled)
 
-			return True
+            return True
 
-	def _delete(self, key):
-		del self._cache[key]
+    def _delete(self, key):
+        del self._cache[key]
 
-	def delete(self, key, autopurge = True):
-		with self._lock:
-			if autopurge:
-				self.purge()
+    def delete(self, key, autopurge = True):
+        with self._lock:
+            if autopurge:
+                self.purge()
 
-			if key in self._cache:
-				_, val = self._cache[key]
-				self._delete(key)
-				return True
-			else:
-				return False
+            if key in self._cache:
+                _, val = self._cache[key]
+                self._delete(key)
+                return True
+            else:
+                return False
 
-	def purge(self, aggressive = False):
-		with self._lock:
-			size = len(self._cache)
-			threshold = (self._threshold or size) * (2 + (not aggressive)) / 3
-			if not(aggressive or (size > threshold)):
-				return False
+    def purge(self, aggressive = False):
+        with self._lock:
+            size = len(self._cache)
+            threshold = (self._threshold or size) * (2 + (not aggressive)) / 3
+            if not(aggressive or (size > threshold)):
+                return False
 
-			purged = 0
-			now = time()
-			for k, (exp, _) in self._cache.items():
-				if (exp and (exp <= now)):
-					self._delete(key)
-					size -= 1
-					purged += 1
+            purged = 0
+            now = time()
+            for k, (exp, _) in self._cache.items():
+                if (exp and (exp <= now)):
+                    self._delete(key)
+                    size -= 1
+                    purged += 1
 
-			if aggressive:
-				while (size > threshold):
-					self._cache.popitem(False)
-					size -= 1
-					purged += 1
+            if aggressive:
+                while (size > threshold):
+                    self._cache.popitem(False)
+                    size -= 1
+                    purged += 1
 
-			return purged
+            return purged
 
-	def _setautopurge(self):
-		stopped = Event()
+    def _setautopurge(self):
+        stopped = Event()
 
-		def loop():
-			while not stopped.wait(300):
-				self.purge()
+        def loop():
+            while not stopped.wait(300):
+                self.purge()
 
-		thread = Thread(target = loop)
-		thread.daemon = True
-		thread.start()
+        thread = Thread(target = loop)
+        thread.daemon = True
+        thread.start()
 
-		return stopped	
+        return stopped
