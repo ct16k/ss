@@ -84,12 +84,9 @@ class KeyCache(object):
         return zlib.decompress(data, 15) #-15)
 
     # decrement number of views for a key
-    def _decviews(self, uid, msgidx, cryptidx):
-        self._viewcount[uid] -= 1
-        if (self._viewcount[uid] == 0):
-            self._cache.delete(uid)
-            del self._viewcount[uid]
-
+    def _decviews(self, views, msgidx, cryptidx):
+        views -= 1
+        if (views == 0):
             self._msgkey[msgidx]['count'] -= 1
             if (self._msgkey[msgidx]['count'] == 0):
                 self._msgkey[msgidx]['key'] = Random.new().read(self._keysize)
@@ -101,6 +98,8 @@ class KeyCache(object):
                 self._cryptkey[cryptidx]['key'] = Random.new().read(self._keysize)
                 if self._debug:
                     print('cryptkey[%d]: %s' % (cryptidx, self._cryptkey[cryptidx]['key'].encode('hex')))
+
+        return views
 
     def __init__(self, settings):
         # debug
@@ -126,7 +125,6 @@ class KeyCache(object):
 
         # init backend and view counter
         self._cache = settings['BACKEND'](self._threshold, self._timeout)
-        self._viewcount = Counter()
 
         # key pool
         self._msgkey = [{'key': Random.new().read(self._keysize), 'count': 0} for _ in xrange(self._keycount)]
@@ -167,10 +165,14 @@ class KeyCache(object):
         if self._debug:
             print('uid: ' + uid.encode('hex'))
 
-        cryptmsg = self._cache.get(uid)
+        cryptmsg, views = self._cache.get(uid)
         if cryptmsg:
-            if (not uid in self._viewcount) or (self._viewcount[uid] < 1):
+            if (views < 1):
+                self._cache.delete(uid)
                 return (None, self.ERROR_VIEWCOUNT_INVALID)
+
+            if self._debug:
+                print('views: ' + str(views))
 
             fmt = '%ds %ds %ds' % (SHA256.digest_size, self._kcsize, AES.block_size)
             digest, msgidx, msgiv = struct.unpack(fmt, cryptmsg[:struct.calcsize(fmt)])
@@ -181,11 +183,12 @@ class KeyCache(object):
 
             if (digest != HMAC.new(extra, cryptmsg[SHA256.digest_size:], SHA256).digest()):
                 if self._extrascount:
-                    self._decviews(uid, msgidx, cryptidx)
+                    views = self._decviews(views, msgidx, cryptidx)
+                    if views:
+                        self._cache.update(uid, (cryptmsg, views))
                 return (None, self.ERROR_EXTRA_MISMATCH)
 
             if self._debug:
-                print('views: ' + str(self._viewcount[uid]))
                 print('msgidx: ' + str(msgidx))
                 print('msgiv: ' + msgiv.encode('hex'))
 
@@ -196,7 +199,9 @@ class KeyCache(object):
             salt, digest = struct.unpack(fmt, signedmsg[:struct.calcsize(fmt)])
             message = signedmsg[struct.calcsize(fmt):]
 
-            self._decviews(uid, msgidx, cryptidx)
+            views = self._decviews(views, msgidx, cryptidx)
+            if views:
+                self._cache.update(uid, (cryptmsg, views))
 
             if (digest != HMAC.new(salt, message, SHA256).digest()):
                 return (None, self.ERROR_MESSAGE_CORRUPT)
@@ -229,8 +234,7 @@ class KeyCache(object):
 
         while True:
             uid = uuid.uuid4().bytes
-            # if not self._cache.get(uid):
-            if not uid in self._viewcount:
+            if not self._cache.has(uid):
                 break
         if self._debug:
             print('uid: ' + uid.encode('hex'))
@@ -246,9 +250,7 @@ class KeyCache(object):
         salt = Random.new().read(SHA256.digest_size)
         cryptmsg = self._intpack(msgidx, self._kcsize) + msgiv + msgcipher.encrypt(salt) + msgcipher.encrypt(HMAC.new(salt, message, SHA256).digest()) + msgcipher.encrypt(message)
 
-        if self._cache.set(uid, HMAC.new(extra, cryptmsg, SHA256).digest() + cryptmsg):
-            self._viewcount[uid] = views;
-
+        if self._cache.set(uid, (HMAC.new(extra, cryptmsg, SHA256).digest() + cryptmsg, views)):
             cryptiv = Random.new().read(AES.block_size)
             cryptidx = random.randint(0, self._keycount - 1)
             if self._debug:

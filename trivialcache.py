@@ -89,6 +89,20 @@ class TrivialCache(object):
 
             return True
 
+    def update(self, key, value, timeout = None):
+        with self._lock:
+            if key in self._cache:
+                exp, _ = self._cache[key]
+                if exp and (not timeout):
+                    exp -= time()
+                    if (exp > 0):
+                    	timeout = exp
+                    else:
+                    	self._delete(key)
+                    	return False
+
+                return self.set(key, value, timeout)
+
     def _delete(self, key):
         del self._cache[key]
 
