@@ -25,16 +25,18 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 '''
 
+from os import getpid
+from threading import current_thread, local
+import logging
 from Crypto import Random
 from flask import Flask, request, render_template_string, Response, make_response
 from keycache import KeyCache
-import logging
 from trivialcache import TrivialCache
 
 # default configuration
-DEBUG = False
+DEBUG = True
 BACKEND = TrivialCache
-INSTANCEID = Random.new().read(1)
+INSTANCEID = None
 URLPREFIX = 'https'
 LISTENADDR = '192.168.214.252'
 LISTENPORT = 29555
@@ -61,6 +63,29 @@ app = Flask(__name__, static_url_path='')
 app.config.from_object(__name__)
 app.config.from_envvar('SS_CONFIG', silent = True)
 logger = logging.getLogger('werkzeug')
+
+tls = local()
+tls.cache = None
+
+@app.before_first_request
+def before_first_request():
+    # pack an int to a binary string
+    def _geniid(nums):
+        hash = 0
+        for i in nums:
+            while (i > 0):
+                hash = (hash + (hash << 5)) ^ (i & 0xFF)
+                i >>= 8
+        hash = (hash ^ (hash >> 16)) &0xFFFF
+
+        return '%c%c' % (chr(hash >> 8), chr(hash & 0xFF))
+
+    if not app.config['INSTANCEID']:
+        app.config['INSTANCEID'] = _geniid([getpid(), current_thread().ident])
+    if app.config['DEBUG']:
+        print('init: %d %d' % (getpid(), current_thread().ident))
+
+    tls.cache = KeyCache(app.config)
 
 @app.route('/')
 def index():
@@ -133,7 +158,7 @@ def get_key(arg):
         print('extra: ' + extra)
 
     compressed = 'deflate' in request.headers.get('Accept-Encoding', '').lower()
-    message, err = cache.get(arg, extra, compressed)
+    message, err = tls.cache.get(arg, extra, compressed)
     if message:
         if compressed and err:
             res = make_response(message)
@@ -148,15 +173,15 @@ def get_key(arg):
         return message
     else:
         errmsg = {
-            cache.ERROR_KEY_INVALID: 'Wat',
-            cache.ERROR_KEY_CORRUPT: 'Erm',
-            cache.ERROR_INSTANCEID_INVALID: 'Eh?',
-            cache.ERROR_CRYPTINDEX_INVALID: 'Err',
-            cache.ERROR_VIEWCOUNT_INVALID: 'Hmpf',
-            cache.ERROR_MSGINDEX_INVALID: 'Hmm',
-            cache.ERROR_EXTRA_MISMATCH: 'Nope',
-            cache.ERROR_MESSAGE_CORRUPT: 'Wot',
-            cache.ERROR_CACHE_NOTFOUND: 'No get'
+            tls.cache.ERROR_KEY_INVALID: 'Wat',
+            tls.cache.ERROR_KEY_CORRUPT: 'Erm',
+            tls.cache.ERROR_INSTANCEID_INVALID: 'Eh?',
+            tls.cache.ERROR_CRYPTINDEX_INVALID: 'Err',
+            tls.cache.ERROR_VIEWCOUNT_INVALID: 'Hmpf',
+            tls.cache.ERROR_MSGINDEX_INVALID: 'Hmm',
+            tls.cache.ERROR_EXTRA_MISMATCH: 'Nope',
+            tls.cache.ERROR_MESSAGE_CORRUPT: 'Wot',
+            tls.cache.ERROR_CACHE_NOTFOUND: 'No get'
         }
         return Response(errmsg.get(err, '?'), mimetype = 'text/plain')
 
@@ -166,7 +191,7 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS']):
         print('extra: ' + str(extra))
         print('views: ' + str(views))
 
-    urlkey, err = cache.set(message, extra, views)
+    urlkey, err = tls.cache.set(message, extra, views)
     if urlkey:
         if extra:
             extraflag = '?'
@@ -175,7 +200,7 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS']):
         return '%s://%s/get/%s%s' % (app.config['URLPREFIX'], request.host, extraflag, urlkey)
     else:
         errmsg = {
-            cache.ERROR_CACHE_NOTSET: 'No set'
+            tls.cache.ERROR_CACHE_NOTSET: 'No set'
         }
         return errmsg.get(err, '?')
 
@@ -290,5 +315,4 @@ def before_request():
 		logger.info("access_route: " + ', '.join(route[-4:]))
 
 if __name__ == '__main__':
-    cache = KeyCache(app.config)
     app.run(host = app.config['LISTENADDR'], port = app.config['LISTENPORT'], debug = app.config['DEBUG'])

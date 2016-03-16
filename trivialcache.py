@@ -142,11 +142,14 @@ class TrivialCache(object):
             return purged
 
     def _setautopurge(self):
-        stopped = Event()
-
         def loop():
             while not stopped.wait(300):
                 self.purge()
+
+        if not self._timeout:
+            return None
+
+        stopped = Event()
 
         thread = Thread(target = loop)
         thread.daemon = True

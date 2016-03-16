@@ -60,8 +60,8 @@ class KeyCache(object):
     def _intpack(self, num, length):
         res = [chr(0)] * length
         i = 1
-        while i <= length:
-            res[length - i] = chr(num % 256)
+        while (num > 0) and (i <= length):
+            res[length - i] = chr(num & 255)
             i += 1
             num >>= 8
 
