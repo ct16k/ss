@@ -65,9 +65,9 @@ app.config.from_object(__name__)
 app.config.from_envvar('SS_CONFIG', silent = True)
 logger = logging.getLogger('werkzeug')
 
-template = None
 
 tls = local()
+tls.template = None
 tls.cache = None
 
 @app.before_first_request
@@ -92,12 +92,12 @@ def before_first_request():
         import json
 
         with open(app.config['TEMPLATENAME']) as template_json:
-            template = json.load(template_json)
+            tls.template = json.load(template_json)
         if app.config['DEBUG']:
             from pprint import pprint
 
             print('template: ' + app.config['TEMPLATENAME'])
-            pprint(template)
+            pprint(tls.template)
 
     tls.cache = KeyCache(app.config)
 
@@ -109,8 +109,8 @@ def rendertemplate(tmpl, **kwargs):
 
 @app.route('/')
 def index():
-    if template and template['index']:
-        return Response(rendertemplate(template['index'], host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = template['index']['type'] or 'text/html')
+    if tls.template and ('index' in tls.template):
+        return Response(rendertemplate(tls.template['index'], host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = tls.template['index']['type'] or 'text/html')
     else:
         return Response(render_template_string('''<html>
   <head>
@@ -148,8 +148,8 @@ def index():
 </html>''', host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = 'text/html')
 
 def get_form(arg):
-    if template and template['getindex']:
-        return Response(rendertemplate(template['getform'], host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg), mimetype = template['index']['type'] or 'text/html')
+    if tls.template and ('getform' in tls.template):
+        return Response(rendertemplate(tls.template['getform'], host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg), mimetype = tls.template['getform']['type'] or 'text/html')
     else:
         return Response(render_template_string('''<html>
   <head>
@@ -183,7 +183,7 @@ def get_key(arg):
         print('arg: ' + arg)
         print('extra: ' + extra)
 
-    compressed = not(template and template['getkey']) and ('deflate' in request.headers.get('Accept-Encoding', '').lower())
+    compressed = not(tls.template and ('getkey' in tls.template)) and ('deflate' in request.headers.get('Accept-Encoding', '').lower())
     message, err = tls.cache.get(arg, extra, compressed)
     if message:
         if compressed and err:
@@ -194,8 +194,8 @@ def get_key(arg):
             res.headers['Content-Length'] = res.content_length
 
             return res
-        elif template and template['getkey']:
-            return Response(rendertemplate(template['getkey'], message = message), mimetype = template['getkey']['type'] or 'text/plain')
+        elif tls.template and ('getkey' in tls.template):
+            return Response(rendertemplate(tls.template['getkey'], message = message), mimetype = tls.template['getkey']['type'] or 'text/plain')
         else:
             return Response(message, mimetype = 'text/plain')
     else:
@@ -210,8 +210,8 @@ def get_key(arg):
             tls.cache.ERROR_MESSAGE_CORRUPT: 'Wot',
             tls.cache.ERROR_CACHE_NOTFOUND: 'No get'
         }
-        if template and template['errorpage']:
-            return Response(rendertemplate(template['errorpage'], error = err, errormsg = errmsg.get(err, '?')), mimetype = template['errorpage']['type'] or 'text/html')
+        if tls.template and ('errorpage' in tls.template):
+            return Response(rendertemplate(tls.template['errorpage'], error = err, errormsg = errmsg.get(err, '?')), mimetype = tls.template['errorpage']['type'] or 'text/html')
         else:
             return Response(errmsg.get(err, '?'), mimetype = 'text/plain')
 
@@ -227,16 +227,16 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS']):
             extraflag = '?'
         else:
             extraflag = ''
-        if template and template['setkey']:
-            return rendertemplate(template['setkey'], host = request.host, urlprefix = app.config['URLPREFIX'], key = urlkey, extra = extraflag)
+        if tls.template and ('setkey' in tls.template):
+            return rendertemplate(tls.template['setkey'], host = request.host, urlprefix = app.config['URLPREFIX'], key = urlkey, extra = extraflag)
         else:
             return '%s://%s/get/%s%s' % (app.config['URLPREFIX'], request.host, extraflag, urlkey)
     else:
         errmsg = {
             tls.cache.ERROR_CACHE_NOTSET: 'No set'
         }
-        if template and template['errormsg']:
-            return rendertemplate(template['errormsg'], error = err, errormsg = errmsg.get(err, '?'))
+        if tls.template and ('errormsg' in tls.template):
+            return rendertemplate(tls.template['errormsg'], error = err, errormsg = errmsg.get(err, '?'))
         else:
             return errmsg.get(err, '?')
 
@@ -267,8 +267,8 @@ def set_keys():
         print('views: ' + str(views))
 
     result = [set_key(message, extra, views) for _ in xrange(copies)]
-    if template and template['setkeys']:
-        return Response(rendertemplate(template['setkeys'], keys = result), mimetype = template['setkeys']['type'] or 'text/html')
+    if tls.template and ('setkeys' in tls.template):
+        return Response(rendertemplate(tls.template['setkeys'], keys = result), mimetype = tls.template['setkeys']['type'] or 'text/html')
     else:
         return Response('\n'.join(result), mimetype = 'text/plain')
 
@@ -276,8 +276,8 @@ def gen_key(keycharslen, keylen, copies, views, extra = ''):
     genkey = ''.join([app.config['GENKEYCHARS'][ord(c) % keycharslen] for c in Random.new().read(keylen)])
 
     result = [set_key(genkey, extra, views) for _ in xrange(copies)]
-    if template and template['genkey']:
-        return rendertemplate(template['genkey'], keys = result)
+    if tls.template and ('genkey' in tls.template):
+        return rendertemplate(tls.template['genkey'], keys = result)
     else:
         return '\n'.join(result)
 
@@ -336,8 +336,8 @@ def gen_keys(count, keylen, copies, views):
     extra = request.values.get('extra', '').encode('utf-8')
 
     result = [gen_key(keycharslen, keylen, copies, views, extra) for _ in xrange(count)]
-    if template and template['genkeys']:
-        return Response(rendertemplate(template['genkeys'], keys = result), mimetype = template['genkeys']['type'] or 'text/html')
+    if tls.template and ('genkeys' in tls.template):
+        return Response(rendertemplate(tls.template['genkeys'], keys = result), mimetype = tls.template['genkeys']['type'] or 'text/html')
     else:
         return Response('\n\n'.join(result), mimetype = 'text/plain')
 
