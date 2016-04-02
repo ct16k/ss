@@ -1,0 +1,28 @@
+<html>
+  <head>
+    <title>ss</title>
+    <style>
+      .unselectable {
+        color: Gainsboro;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <table  style="border: 0; padding: 0; border-spacing: 0; width: auto; margin: auto;">
+      <tr>
+        <td align=center>
+          <span class="unselectable" style="font-family: monospace;">{{ data.msgid|e }}</span>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <pre style="border: 1px solid; border-radius: 16px; border-color: Gainsboro; padding: 16px;">{{ data.message|e }}</pre>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

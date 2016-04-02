@@ -1,0 +1,34 @@
+<html>
+  <head>
+    <title>ss</title>
+  </head>
+  <body>
+    <form action="{{ data.urlprefix }}://{{ data.host }}/set" method="post">
+      <table  style="border: 0; padding: 0; border-spacing: 0; width: auto; margin: auto;">
+        <tr>
+          <td colspan=2>
+            <textarea name="message" rows=5 style="width: 100%;" autofocus="autofocus" placeholder="enter your text here"></textarea>
+          </td>
+        </tr>
+        <tr>
+          <td colspan=2>
+            <input type="text" name="extra" style="width: 100%;" placeholder="extra validation string"/>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <input type="text" name="copies" style="width: 100%;" placeholder="number of copies"/>
+          </td>
+          <td>
+            <input type="text" name="views" style="width: 100%;" placeholder="views per copy"/>
+          </td>
+        </tr>
+        <tr>
+          <td colspan=2>
+            <input type="submit" style="width: 100%;" value="Share" />
+          </td>
+        </tr>
+      </table>
+    </form>
+  </body>
+</html>

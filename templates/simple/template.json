@@ -1,0 +1,40 @@
+{
+    "index": {
+        "template": "templates/simple/index.html",
+        "mimetype": "text/html"
+    },
+    "getform": {
+        "template": "templates/simple/getform.html",
+        "mimetype": "text/html"
+    },
+    "getkey": {
+        "template": "templates/simple/getkey.html",
+        "mimetype": "text/html"
+    },
+    "setkey": {
+        "type": "inline",
+        "template": "{{ data.urlprefix }}://{{ data.host }}/get/{{ data.extra }}{{ data.keyid|e }}<br />",
+        "mimetype": "text/html"
+    },
+    "setkeys": {
+        "template": "templates/simple/setkeys.html",
+        "mimetype": "text/html"
+    },
+    "genkey": {
+        "template": "templates/simple/genkey.html",
+        "mimetype": "text/plain"
+    },
+    "genkeys": {
+        "template": "templates/simple/genkeys.html",
+        "mimetype": "text/html"
+    },
+    "geterror": {
+        "template": "templates/simple/geterror.html",
+        "mimetype": "text/html"
+    },
+    "seterror": {
+        "type": "inline",
+        "template": "<span style=\"color: Crimson;\">{{ data.error }} - {{ data.errormsg }}</span>",
+        "mimetype": "text/html"
+    }
+}

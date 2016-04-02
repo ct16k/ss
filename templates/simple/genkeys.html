@@ -1,0 +1,42 @@
+<html>
+  <head>
+    <title>ss</title>
+    <style>
+      .unselectable {
+        color: Gainsboro;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <table  style="border: 0; padding: 0; border-spacing: 0; width: auto; margin: auto;">
+      <tr>
+        <td />
+        <td align=center>
+          <span class="unselectable">count: {{ data.count }}</span>
+        </td>
+        <td align=center>
+          <span class="unselectable">copies: {{ data.copies }}</span>
+        </td>
+        <td align=center>
+          <span class="unselectable">views: {{ data.views }}</span>
+        </td>
+      </tr>
+      {%- set index = 1 -%}
+      {%- for keyid in data.keyids -%}<tr>
+        <td style="text-align: right;">
+          <span  class="unselectable">{{ index }}&nbsp;&nbsp;</span>
+        </td>
+        <td colspan=3>
+          <p style="border: 1px solid; border-radius: 16px; border-color: Gainsboro; padding: 16px; font-family: monospace; text-align: right;">
+            {{ keyid }}
+          </p>
+        </td>
+            {%- set index = index + 1 -%}
+      </tr>{%- endfor -%}
+    </table>
+  </body>
+</html>

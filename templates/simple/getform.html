@@ -1,0 +1,18 @@
+<html>
+  <head>
+    <title>ss</title>
+  </head>
+  <body>
+    <form action="{{ data.urlprefix }}://{{ data.host }}/get/" method="post">
+      <table  style="border: 0; padding: 0; border-spacing: 0; width: auto; margin: auto;">
+        <tr>
+          <td>
+            <input type="text" name="arg" style="width: 100%;" value="{{ data.msgid }}" placeholder= "message id" />
+            <input type="text" name="extra" style="width: 100%;" autofocus="autofocus" placeholder="extra validation string" />
+            <input type="submit" style="width: 100%;" value="Retrieve" />
+          </td>
+        </tr>
+      </table>
+    </form>
+  </body>
+</html>

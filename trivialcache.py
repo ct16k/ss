@@ -1,4 +1,3 @@
-
 '''
 Copyright (c) 2016, Theodor-Iulian Ciobanu
 All rights reserved.

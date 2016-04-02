@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 '''
 Copyright (c) 2015-2016, Theodor-Iulian Ciobanu
 All rights reserved.
@@ -105,21 +103,21 @@ class KeyCache(object):
         # debug
         self._debug = ('DEBUG' in settings) and settings['DEBUG'] or False
         # unique id
-        self._instanceid = ('INSTANCEID' in settings) and settings['INSTANCEID'] or Random.new().read(1)
+        self._instanceid = settings['INSTANCEID'] if ('INSTANCEID' in settings) else Random.new().read(1)
         self._iidsize = len(self._instanceid)
         # max number of messages to store
-        self._threshold = ('THRESHOLD' in settings) and settings['THRESHOLD'] or 1024
+        self._threshold = settings['THRESHOLD'] if ('THRESHOLD' in settings) else 1024
         # message ttl
-        self._timeout = ('TIMEOUT' in settings) and settings['TIMEOUT'] or 302400
+        self._timeout = settings['TIMEOUT'] if ('TIMEOUT' in settings) else 302400
         # key pool size
-        self._keycount = ('KEYCOUNT' in settings) and settings['KEYCOUNT'] or 256
+        self._keycount = settings['KEYCOUNT'] if ('KEYCOUNT' in settings) else 256
         self._kcsize = self._bytesize(self._keycount - 1)
         # key size
-        self._keysize = ('KEYSIZE' in settings) and settings['KEYSIZE'] or 32
+        self._keysize = settings['KEYSIZE'] if ('KEYSIZE' in settings) else 32
         # compress messages bigger than this (None to disable)
-        self._mincompsize = ('MINCOMPSIZE' in settings) and settings['MINCOMPSIZE'] or 128
+        self._mincompsize = settings['MINCOMPSIZE'] if ('MINCOMPSIZE' in settings) else 128
         # number of views allowed
-        self._views = ('VIEWS' in settings) and settings['VIEWS'] or 1
+        self._views = settings['VIEWS'] if ('VIEWS' in settings) else 1
         # view attempts with a wrong 'extra' count
         self._extrascount = ('EXTRASCOUNT' in settings) and settings['EXTRASCOUNT'] or True
 

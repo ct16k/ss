@@ -32,14 +32,17 @@ from Crypto import Random
 from flask import Flask, request, render_template, render_template_string, Response, make_response
 from keycache import KeyCache
 from trivialcache import TrivialCache
+from trivialtemplate import TrivialTemplate
 
 # default configuration
 DEBUG = False
 BACKEND = TrivialCache
 INSTANCEID = None
-TEMPLATENAME = None
+TEMPLATES = {}
+DEFAULTTEMPLATE = '_builtin'
+TEMPLATENAME = DEFAULTTEMPLATE
 URLPREFIX = 'https'
-LISTENADDR = '192.168.214.252'
+LISTENADDR = '127.0.0.1'
 LISTENPORT = 29555
 THRESHOLD = 1024
 TIMEOUT = 302400
@@ -59,65 +62,16 @@ GENKEYS = 1
 GENKEYLEN = 16
 GENKEYCHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
 
-# app init
-app = Flask(__name__, static_url_path='')
-app.config.from_object(__name__)
-app.config.from_envvar('SS_CONFIG', silent = True)
-logger = logging.getLogger('werkzeug')
-
-
-tls = local()
-tls.template = None
-tls.cache = None
-
-@app.before_first_request
-def before_first_request():
-    # 16bit hash of a list of ints
-    def _geniid(nums):
-        hash = 0
-        for i in nums:
-            while (i > 0):
-                hash = (hash + (hash << 5)) ^ (i & 0xFF)
-                i >>= 8
-        hash = (hash ^ (hash >> 16)) &0xFFFF
-
-        return '%c%c' % (chr(hash >> 8), chr(hash & 0xFF))
-
-    if not app.config['INSTANCEID']:
-        app.config['INSTANCEID'] = _geniid([getpid(), current_thread().ident])
-    if app.config['DEBUG']:
-        print('init: %d %d' % (getpid(), current_thread().ident))
-
-    if app.config['TEMPLATENAME']:
-        import json
-
-        with open(app.config['TEMPLATENAME']) as template_json:
-            tls.template = json.load(template_json)
-        if app.config['DEBUG']:
-            from pprint import pprint
-
-            print('template: ' + app.config['TEMPLATENAME'])
-            pprint(tls.template)
-
-    tls.cache = KeyCache(app.config)
-
-def rendertemplate(tmpl, **kwargs):
-    if tmpl['type'] and (tmpl['type'] == 'inline'):
-        return render_template_string(tmpl['template'], **kwargs)
-    else:
-        return render_template(tmpl['template'], **kwargs)
-
-@app.route('/')
-def index():
-    if tls.template and ('index' in tls.template):
-        return Response(rendertemplate(tls.template['index'], host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = tls.template['index']['type'] or 'text/html')
-    else:
-        return Response(render_template_string('''<html>
+# default template
+builtintmpl = {
+    'index': {
+        'type': 'inline',
+        'template': '''<html>
   <head>
     <title>ss</title>
   </head>
   <body>
-    <form action="{{ urlprefix }}://{{ host }}/set" method="post">
+    <form action="{{ data.urlprefix }}://{{ data.host }}/set" method="post">
       <table  style="border: 0; padding: 0; border-spacing: 0;">
         <tr>
           <td style="vertical-align: top;">
@@ -145,28 +99,118 @@ def index():
       </table>
     </form>
   </body>
-</html>''', host = request.host, urlprefix = app.config['URLPREFIX']), mimetype = 'text/html')
-
-def get_form(arg):
-    if tls.template and ('getform' in tls.template):
-        return Response(rendertemplate(tls.template['getform'], host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg), mimetype = tls.template['getform']['type'] or 'text/html')
-    else:
-        return Response(render_template_string('''<html>
+</html>''',
+        'mimetype': 'text/html'
+    },
+    'getform': {
+        'type': 'inline',
+        'template': '''<html>
   <head>
     <title>ss</title>
   </head>
   <body>
-    <form action="{{ urlprefix }}://{{ host }}/get/" method="post">
+    <form action="{{ data.urlprefix }}://{{ data.host }}/get/" method="post">
       <dl>
         <dt>id:</dt>
-        <dd><input type="text" name="arg" size=60 value="{{ msgid }}"/></dd>
+        <dd><input type="text" name="arg" size=60 value="{{ data.msgid }}"/></dd>
         <dt>extra:</dt>
         <dd><input type="text" name="extra" size=30 /></dd>
       </dl>
       <input type="submit" value="Retrieve" />
     </form>
   </body>
-</html>''', host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg), mimetype = 'text/html')
+</html>''',
+        'mimetype': 'text/html'
+    },
+    'getkey': {
+        'type': 'inline',
+        'template': '''{{ data.message }}''',
+        'mimetype': 'text/plain'
+    },
+    'setkey': {
+        'type': 'inline',
+        'template': '{{ data.urlprefix }}://{{ data.host }}/get/{{ data.extra }}{{ data.keyid }}',
+        'mimetype': 'text/plain'
+    },
+    'setkeys': {
+        'type': 'inline',
+        'template': '''{%- for keyid in data.keyids -%}
+{{ keyid }}
+{% endfor %}''',
+        'mimetype': 'text/plain'
+    },
+    'genkey': {
+        'type': 'inline',
+        'template': '''{%- for keyid in data.keyids -%}
+{{ keyid }}
+{% endfor %}''',
+        'mimetype': 'text/plain'
+    },
+    'genkeys': {
+        'type': 'inline',
+        'template': '''{%- for keyid in data.keyids -%}
+{{ keyid }}
+{% endfor %}''',
+        'mimetype': 'text/plain'
+    },
+    'geterror': {
+        'type': 'inline',
+        'template': '''{{ data.errormsg }}''',
+        'mimetype': 'text/plain'
+    },
+    'seterror': {
+        'type': 'inline',
+        'template': '''{{ data.errormsg }}''',
+        'mimetype': 'text/plain'
+    }
+}
+
+# app init
+app = Flask(__name__, static_url_path='')
+
+app.config.from_object(__name__)
+app.config.from_envvar('SS_CONFIG', silent = True)
+app.config['TEMPLATES']['_builtin'] = builtintmpl
+
+logger = logging.getLogger('werkzeug')
+
+tls = local()
+tls.cache = None
+tls.template = None
+
+@app.before_first_request
+def before_first_request():
+    # 16bit hash of a list of ints
+    def _geniid(nums):
+        hash = 0
+        for i in nums:
+            while (i > 0):
+                hash = (hash + (hash << 5)) ^ (i & 0xFF)
+                i >>= 8
+        hash = (hash ^ (hash >> 16)) &0xFFFF
+
+        return '%c%c' % (chr(hash >> 8), chr(hash & 0xFF))
+
+    if not app.config['INSTANCEID']:
+        app.config['INSTANCEID'] = _geniid([getpid(), current_thread().ident])
+    if app.config['DEBUG']:
+        print('init: %d %d' % (getpid(), current_thread().ident))
+
+    tls.cache = KeyCache(app.config)
+    tls.template = TrivialTemplate(app.config)
+
+@app.route('/', methods = ['GET', 'POST'])
+def index():
+    templatename = request.values.get('template', app.config['TEMPLATENAME'])
+    if (templatename.lower() == 'none'):
+        templatename = app.config['DEFAULTTEMPLATE']
+    if app.config['DEBUG']:
+        print('templatename: ' + templatename)
+
+    return tls.template.renderresponse('index', templatename, host = request.host, urlprefix = app.config['URLPREFIX'])
+
+def get_form(arg, templatename = app.config['TEMPLATENAME']):
+    return tls.template.renderresponse('getform', templatename, host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg)
 
 @app.route('/get', methods = ['GET', 'POST'], defaults = {'arg': None})
 @app.route('/get/', methods = ['GET', 'POST'], defaults = {'arg': None})
@@ -179,25 +223,17 @@ def get_key(arg):
 
     arg = arg.encode('ascii')
     extra = request.values.get('extra', '').encode('utf-8')
+    templatename = request.values.get('template', app.config['TEMPLATENAME'])
+    if (templatename.lower() == ' none'):
+        templatename = app.config['DEFAULTTEMPLATE']
     if app.config['DEBUG']:
         print('arg: ' + arg)
         print('extra: ' + extra)
+        print('templatename: ' + templatename)
 
-    compressed = not(tls.template and ('getkey' in tls.template)) and ('deflate' in request.headers.get('Accept-Encoding', '').lower())
-    message, err = tls.cache.get(arg, extra, compressed)
+    message, err = tls.cache.get(arg, extra)
     if message:
-        if compressed and err:
-            res = make_response(message)
-
-            res.mimetype = 'text/plain'
-            res.headers['Content-Encoding'] = 'deflate'
-            res.headers['Content-Length'] = res.content_length
-
-            return res
-        elif tls.template and ('getkey' in tls.template):
-            return Response(rendertemplate(tls.template['getkey'], message = message), mimetype = tls.template['getkey']['type'] or 'text/plain')
-        else:
-            return Response(message, mimetype = 'text/plain')
+        return tls.template.renderresponse('getkey', templatename, msgid = arg, message = message)
     else:
         errmsg = {
             tls.cache.ERROR_KEY_INVALID: 'Wat',
@@ -210,16 +246,14 @@ def get_key(arg):
             tls.cache.ERROR_MESSAGE_CORRUPT: 'Wot',
             tls.cache.ERROR_CACHE_NOTFOUND: 'No get'
         }
-        if tls.template and ('errorpage' in tls.template):
-            return Response(rendertemplate(tls.template['errorpage'], error = err, errormsg = errmsg.get(err, '?')), mimetype = tls.template['errorpage']['type'] or 'text/html')
-        else:
-            return Response(errmsg.get(err, '?'), mimetype = 'text/plain')
+        return tls.template.renderresponse('geterror', templatename, msgid = arg, error = err, errormsg = errmsg.get(err, '?'))
 
-def set_key(message, extra = '', views = app.config['DEFVIEWS']):
+def set_key(message, extra = '', views = app.config['DEFVIEWS'], templatename = app.config['TEMPLATENAME']):
     if app.config['DEBUG']:
         print('message: ' + message)
         print('extra: ' + str(extra))
         print('views: ' + str(views))
+        print('templatename: ' + templatename)
 
     urlkey, err = tls.cache.set(message, extra, views)
     if urlkey:
@@ -227,18 +261,12 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS']):
             extraflag = '?'
         else:
             extraflag = ''
-        if tls.template and ('setkey' in tls.template):
-            return rendertemplate(tls.template['setkey'], host = request.host, urlprefix = app.config['URLPREFIX'], key = urlkey, extra = extraflag)
-        else:
-            return '%s://%s/get/%s%s' % (app.config['URLPREFIX'], request.host, extraflag, urlkey)
+        return tls.template.rendertemplate('setkey', templatename, host = request.host, urlprefix = app.config['URLPREFIX'], keyid = urlkey, extra = extraflag, views = views)
     else:
         errmsg = {
             tls.cache.ERROR_CACHE_NOTSET: 'No set'
         }
-        if tls.template and ('errormsg' in tls.template):
-            return rendertemplate(tls.template['errormsg'], error = err, errormsg = errmsg.get(err, '?'))
-        else:
-            return errmsg.get(err, '?')
+        return tls.template.rendertemplate('seterror', templatename, error = err, errormsg = errmsg.get(err, '?'))
 
 @app.route('/set/', methods = ['POST'])
 @app.route('/set', methods = ['POST'])
@@ -259,27 +287,26 @@ def set_keys():
     elif (views > app.config['MAXVIEWS']):
         views = app.config['MAXVIEWS']
 
+    templatename = request.values.get('template', app.config['TEMPLATENAME'])
+    if (templatename.lower() == ' none'):
+        templatename = app.config['DEFAULTTEMPLATE']
+
     if app.config['DEBUG']:
         print('message: ' + message)
         print('messagelen: ' + str(msglen))
         print('extra: ' + str(extra))
         print('copies: ' + str(copies))
         print('views: ' + str(views))
+        print('templatename: ' + templatename)
 
-    result = [set_key(message, extra, views) for _ in xrange(copies)]
-    if tls.template and ('setkeys' in tls.template):
-        return Response(rendertemplate(tls.template['setkeys'], keys = result), mimetype = tls.template['setkeys']['type'] or 'text/html')
-    else:
-        return Response('\n'.join(result), mimetype = 'text/plain')
+    result = [set_key(message, extra, views, templatename) for _ in xrange(copies)]
+    return tls.template.renderresponse('setkeys', templatename, keyids = result, copies = copies, views = views)
 
-def gen_key(keycharslen, keylen, copies, views, extra = ''):
+def gen_key(keycharslen, keylen, copies, views, extra = '', templatename = app.config['TEMPLATENAME']):
     genkey = ''.join([app.config['GENKEYCHARS'][ord(c) % keycharslen] for c in Random.new().read(keylen)])
 
-    result = [set_key(genkey, extra, views) for _ in xrange(copies)]
-    if tls.template and ('genkey' in tls.template):
-        return rendertemplate(tls.template['genkey'], keys = result)
-    else:
-        return '\n'.join(result)
+    result = [set_key(genkey, extra, views, templatename) for _ in xrange(copies)]
+    return tls.template.rendertemplate('genkey', templatename, keyids = result, keylen = keylen, copies = copies, views = views)
 
 @app.route('/gen/', methods = ['GET', 'POST'], defaults = {'count': None, 'keylen': None, 'copies': None, 'views': None})
 @app.route('/gen', methods = ['GET', 'POST'], defaults = {'count': None, 'keylen': None, 'copies': None, 'views': None})
@@ -292,20 +319,15 @@ def gen_key(keycharslen, keylen, copies, views, extra = ''):
 @app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>/', methods = ['GET', 'POST'])
 @app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>', methods = ['GET', 'POST'])
 def gen_keys(count, keylen, copies, views):
-
     if not count:
         count = request.values.get('count', app.config['GENKEYS'], type = int)
         if not count or (count < 1):
             count = app.config['GENKEYS']
-    if app.config['DEBUG']:
-        print('count: ' + str(count))
 
     if not keylen:
         keylen = request.values.get('keylen', app.config['GENKEYLEN'], type = int)
         if (not keylen) or (keylen < 1) or (keylen > app.config['MAX_CONTENT_LENGTH']):
             keylen = app.config['GENKEYLEN']
-    if app.config['DEBUG']:
-        print('keylen: ' + str(keylen))
 
     if not copies:
         copies = request.values.get('copies', app.config['DEFCOPIES'], type = int)
@@ -315,8 +337,6 @@ def gen_keys(count, keylen, copies, views):
             copies = 1
         elif copies > app.config['MAXCOPIES']:
             copies = app.config['MAXCOPIES']
-    if app.config['DEBUG']:
-        print('copies: ' + str(copies))
 
     if not views:
         views = request.values.get('views', app.config['DEFVIEWS'], type = int)
@@ -326,20 +346,25 @@ def gen_keys(count, keylen, copies, views):
             views = 1
         elif views > app.config['MAXVIEWS']:
             views = app.config['MAXVIEWS']
-    if app.config['DEBUG']:
-        print('views: ' + str(views))
 
     keycharslen = len(app.config['GENKEYCHARS'])
-    if app.config['DEBUG']:
-        print('keycharslen: ' + str(keycharslen))
 
     extra = request.values.get('extra', '').encode('utf-8')
 
-    result = [gen_key(keycharslen, keylen, copies, views, extra) for _ in xrange(count)]
-    if tls.template and ('genkeys' in tls.template):
-        return Response(rendertemplate(tls.template['genkeys'], keys = result), mimetype = tls.template['genkeys']['type'] or 'text/html')
-    else:
-        return Response('\n\n'.join(result), mimetype = 'text/plain')
+    templatename = request.values.get('template', app.config['TEMPLATENAME'])
+    if (templatename.lower() == ' none'):
+        templatename = app.config['DEFAULTTEMPLATE']
+
+    if app.config['DEBUG']:
+        print('count: ' + str(count))
+        print('keylen: ' + str(keylen))
+        print('copies: ' + str(copies))
+        print('views: ' + str(views))
+        print('keycharslen: ' + str(keycharslen))
+        print('templatename: ' + templatename)
+
+    result = [gen_key(keycharslen, keylen, copies, views, extra, templatename) for _ in xrange(count)]
+    return tls.template.renderresponse('genkeys', templatename, keyids = result, count = count, keylen = keylen, copies = copies, views = views)
 
 @app.route('/src/', methods = ['GET', 'POST'])
 @app.route('/src', methods = ['GET', 'POST'])
