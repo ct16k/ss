@@ -25,7 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 '''
 
-from os import getpid
+from os import getenv, getpid
 from threading import current_thread, local
 import logging
 from Crypto import Random
@@ -37,7 +37,7 @@ from trivialtemplate import TrivialTemplate
 # default configuration
 DEBUG = False
 BACKEND = TrivialCache
-INSTANCEID = None
+INSTANCEID = getenv('SS_INSTANCEID', None)
 TEMPLATES = {}
 DEFAULTTEMPLATE = '_builtin'
 TEMPLATENAME = DEFAULTTEMPLATE
@@ -79,7 +79,7 @@ builtintmpl = {
               <dt>message:</dt>
               <dd><textarea name="message" rows=5 cols=40 autofocus="autofocus"></textarea></dd>
               <dt>extra:</dt>
-              <dd><input type="text" name="extra" size=30 /></dd>
+              <dd><input type="password" name="extra" size=30 /></dd>
             </dl>
           </td>
           <td style="vertical-align: top;">
@@ -114,7 +114,7 @@ builtintmpl = {
         <dt>id:</dt>
         <dd><input type="text" name="arg" size=60 value="{{ data.msgid }}"/></dd>
         <dt>extra:</dt>
-        <dd><input type="text" name="extra" size=30 /></dd>
+        <dd><input type="password" name="extra" size=30 /></dd>
       </dl>
       <input type="submit" value="Retrieve" />
     </form>
@@ -170,6 +170,7 @@ app = Flask(__name__, static_url_path='')
 
 app.config.from_object(__name__)
 app.config.from_envvar('SS_CONFIG', silent = True)
+app.debug = app.config['DEBUG']
 app.config['TEMPLATES']['_builtin'] = builtintmpl
 
 logger = logging.getLogger('werkzeug')
