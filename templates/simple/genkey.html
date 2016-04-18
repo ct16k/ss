@@ -1,5 +1,5 @@
 {%- set index = 1 -%}
 {%- for keyid in data.keyids -%}
-<span  class="unselectable">{{ index }} </span>{{ keyid }}
+{{ index }}&nbsp;<span class="selectable">{{ keyid }}</span>
 {%- set index = index + 1 -%}
 {%- endfor -%}

@@ -34,7 +34,7 @@
     },
     "seterror": {
         "type": "inline",
-        "template": "<span style=\"color: Crimson;\">{{ data.error }} - {{ data.errormsg }}</span>",
+        "template": "<span style=\"color: Crimson;\">{{ data.error }} - {{ data.errormsg }}</span><br />",
         "mimetype": "text/html"
     }
 }

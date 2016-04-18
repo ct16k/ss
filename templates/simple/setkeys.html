@@ -9,16 +9,23 @@
         -ms-user-select: none;
         user-select: none;
       }
+      .selectable {
+        color: initial;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+        user-select: text;
+      }
     </style>
   </head>
-  <body>
-    <table  style="border: 0; padding: 0; border-spacing: 0; width: auto; margin: auto;">
+  <body class="unselectable">
+    <table style="border: 0; padding: 0; border-spacing: 0; width: auto; margin: auto;">
       <tr>
         <td align=center>
-          <span class="unselectable">copies: {{ data.copies }}</span>
+          copies: {{ data.copies }}
         </td>
         <td align=center>
-          <span class="unselectable">views: {{ data.views }}</span>
+          views: {{ data.views }}
         </td>
       </tr>
       <tr>
@@ -26,7 +33,7 @@
           <p style="border: 1px solid; border-radius: 16px; border-color: Gainsboro; padding: 16px; font-family: monospace; text-align: right;">
             {%- set index = 1 -%}
             {%- for keyid in data.keyids %}
-            <span  class="unselectable">{{ index }} </span>{{ keyid }}
+            {{ index }}&nbsp;<span  class="selectable">{{ keyid }}</span>
             {%- set index = index + 1 -%}
             {%- endfor %}
           </p>

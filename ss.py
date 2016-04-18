@@ -29,7 +29,7 @@ from os import getenv, getpid
 from threading import current_thread, local
 import logging
 from Crypto import Random
-from flask import Flask, request, render_template, render_template_string, Response, make_response
+from flask import Flask, request, Response
 from keycache import KeyCache
 from trivialcache import TrivialCache
 from trivialtemplate import TrivialTemplate
@@ -225,7 +225,7 @@ def get_key(arg):
     arg = arg.encode('ascii')
     extra = request.values.get('extra', '').encode('utf-8')
     templatename = request.values.get('template', app.config['TEMPLATENAME'])
-    if (templatename.lower() == ' none'):
+    if (templatename.lower() == 'none'):
         templatename = app.config['DEFAULTTEMPLATE']
     if app.config['DEBUG']:
         print('arg: ' + arg)
@@ -289,7 +289,7 @@ def set_keys():
         views = app.config['MAXVIEWS']
 
     templatename = request.values.get('template', app.config['TEMPLATENAME'])
-    if (templatename.lower() == ' none'):
+    if (templatename.lower() == 'none'):
         templatename = app.config['DEFAULTTEMPLATE']
 
     if app.config['DEBUG']:
@@ -353,7 +353,7 @@ def gen_keys(count, keylen, copies, views):
     extra = request.values.get('extra', '').encode('utf-8')
 
     templatename = request.values.get('template', app.config['TEMPLATENAME'])
-    if (templatename.lower() == ' none'):
+    if (templatename.lower() == 'none'):
         templatename = app.config['DEFAULTTEMPLATE']
 
     if app.config['DEBUG']:
