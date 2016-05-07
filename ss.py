@@ -28,8 +28,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from os import getenv, getpid
 from threading import current_thread, local
 import logging
+import re
 from Crypto import Random
 from flask import Flask, request, Response
+from werkzeug.routing import BaseConverter
 from keycache import KeyCache
 from trivialcache import TrivialCache
 from trivialtemplate import TrivialTemplate
@@ -57,6 +59,9 @@ MAXCOPIES = 16
 DEFVIEWS = 1
 MAXVIEWS = 16
 EXTRASCOUNT = True
+
+ADMINIPS = [ '127.0.0.1' ]
+BLOCKEDUA = []
 
 GENKEYS = 1
 GENKEYLEN = 16
@@ -162,6 +167,22 @@ builtintmpl = {
         'type': 'inline',
         'template': '''{{ data.errormsg }}''',
         'mimetype': 'text/plain'
+    },
+    'adminmsg': {
+        'type': 'inline',
+        'template': '''{{ data.message }}''',
+        'mimetype': 'text/plain'
+    },
+    'adminerror': {
+        'type': 'inline',
+        'template': '''{{ data.errormsg }}''',
+        'mimetype': 'text/plain'
+    },
+    'blockget': {
+        'type': 'inline',
+        'template': '',
+        'mimetype': 'text/plain',
+        'statuscode': 204
     }
 }
 
@@ -178,6 +199,32 @@ logger = logging.getLogger('werkzeug')
 tls = local()
 tls.cache = None
 tls.template = None
+tls.uaregex = None
+
+# regex mapper
+class RegexConverter(BaseConverter):
+    def __init__(self, url_map, *items):
+        super(RegexConverter, self).__init__(url_map)
+        self.regex = items[0]
+
+app.url_map.converters['regex'] = RegexConverter
+
+def loaduaregexps():
+    if app.config['BLOCKEDUA']:
+        uaregex = []
+
+        if isinstance(app.config['BLOCKEDUA'], list):
+            uaiter = iter(app.config['BLOCKEDUA'])
+        else:
+            with open(app.config['BLOCKEDUA'], 'rU') as f:
+                uaiter = f.readlines()
+
+        for useragent in uaiter:
+            uaregex.append(re.compile(useragent.rstrip('\r\n')))
+            if app.config['DEBUG']:
+                print('block: ' + useragent.rstrip('\r\n'))
+
+        tls.uaregex = uaregex
 
 @app.before_first_request
 def before_first_request():
@@ -196,6 +243,8 @@ def before_first_request():
         app.config['INSTANCEID'] = _geniid([getpid(), current_thread().ident])
     if app.config['DEBUG']:
         print('init: %d %d' % (getpid(), current_thread().ident))
+
+    loaduaregexps()
 
     tls.cache = KeyCache(app.config)
     tls.template = TrivialTemplate(app.config)
@@ -231,6 +280,14 @@ def get_key(arg):
         print('arg: ' + arg)
         print('extra: ' + extra)
         print('templatename: ' + templatename)
+
+    if tls.uaregex:
+        uastr = request.user_agent.string
+        for uaregex in tls.uaregex:
+            if uaregex.search(uastr):
+                if app.config['DEBUG']:
+                    print('blocked: ' + uastr)
+                return tls.template.renderresponse('blockget', templatename, msgid = arg, errormsg = 'Mhh')
 
     message, err = tls.cache.get(arg, extra)
     if message:
@@ -367,6 +424,37 @@ def gen_keys(count, keylen, copies, views):
     result = [gen_key(keycharslen, keylen, copies, views, extra, templatename) for _ in xrange(count)]
     return tls.template.renderresponse('genkeys', templatename, keyids = result, count = count, keylen = keylen, copies = copies, views = views)
 
+def is_admin(ipaddr):
+    return ipaddr in app.config['ADMINIPS']
+
+@app.route('/admin/<regex("clearcache|reload(tmpl|ua)"):command>', methods = ['GET', 'POST'])
+@app.route('/admin/<regex("clearcache|reload(tmpl|ua)"):command>/<param>', methods = ['GET', 'POST'])
+def admin_cmds(command = '', param = ''):
+    templatename = request.values.get('template', app.config['TEMPLATENAME'])
+    if (templatename.lower() == 'none'):
+        templatename = app.config['DEFAULTTEMPLATE']
+
+    if app.config['DEBUG']:
+        print('admin: ' + command)
+        print('param: ' + param)
+        print('templatename: ' + templatename)
+
+    if not is_admin(request.remote_addr):
+        return tls.template.renderresponse('adminerror', templatename, 403, errormsg = "Access denied")
+
+    if command == 'clearcache':
+        tls.cache.clear()
+    elif (command == 'reloadtmpl'):
+        if not param:
+            param = templatename
+        tls.template.loadtemplate(param)
+    elif (command == 'reloadua'):
+        loaduaregexps()
+    else:
+        return tls.template.renderresponse('adminerror', templatename, 400, errormsg = "Bad request")
+
+    return tls.template.renderresponse('adminmsg', templatename, message = command)
+
 @app.route('/src/', methods = ['GET', 'POST'])
 @app.route('/src', methods = ['GET', 'POST'])
 def get_src():
@@ -375,15 +463,17 @@ def get_src():
 
 @app.before_request
 def before_request():
-	route = None
-	if 'X-Forwarded-For' in request.headers:
-		route = request.headers.getlist('X-Forwarded-For')
-	elif 'Forwarded-For' in request.headers:
-		route = request.headers.getlist('Forwarded-For')
-	elif 'X-Real-Ip' in request.headers:
-		route = request.headers.getlist('X-Real-Ip')
-	if route:
-		logger.info("access_route: " + ', '.join(route[-4:]))
+    route = None
+    if 'X-Forwarded-For' in request.headers:
+        route = request.headers.getlist('X-Forwarded-For')
+    elif 'Forwarded-For' in request.headers:
+        route = request.headers.getlist('Forwarded-For')
+    elif 'X-Real-Ip' in request.headers:
+        route = request.headers.getlist('X-Real-Ip')
+    if route:
+        logger.info("accessroute: " + ', '.join(route[-4:]))
+
+    logger.info('useragent: ' + request.user_agent.string)
 
 if __name__ == '__main__':
     app.run(host = app.config['LISTENADDR'], port = app.config['LISTENPORT'], debug = app.config['DEBUG'])

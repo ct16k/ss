@@ -132,6 +132,10 @@ class KeyCache(object):
             print('msgkey: ' + ', '.join(key['key'].encode('hex') for key in self._msgkey))
             print('cryptkey: ' + ', '.join(key['key'].encode('hex') for key in self._cryptkey))
 
+        # inherit
+        self.autopurge = self._cache.autopurge
+        self.clear = self._cache.clear
+
     def get(self, key = '', extra = '', compressed = False):
         if self._debug:
             print('key: ' + key)

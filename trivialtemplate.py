@@ -89,11 +89,14 @@ class TrivialTemplate(object):
 
         return render_template_string(template['template'], data = kwargs)
 
-    def renderresponse(self, pagename, templatename = None, **kwargs):
+    def renderresponse(self, pagename, templatename = None, statuscode = None, **kwargs):
         templatename = templatename or self._deftmplname
         template = (self._templates.get(templatename) or self.loadtemplate(templatename))[pagename]
 
-        return Response(render_template_string(template['template'], data = kwargs), mimetype = template['mimetype'] if ('mimetype' in template) else 'text/html')
+        if not statuscode:
+            statuscode = template['statuscode'] if ('statuscode' in template) else 200
+
+        return Response(render_template_string(template['template'], data = kwargs), status = statuscode, mimetype = template['mimetype'] if ('mimetype' in template) else 'text/html')
 
     def getmimetype(self, pagename, templatename = None):
         templatename = templatename or self._deftmplname

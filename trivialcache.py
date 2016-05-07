@@ -74,9 +74,9 @@ class TrivialCache(object):
             else:
                 exp = None
 
-            if len(self._cache) + (not key in self._cache) > self._threshold:
+            if len(self._cache) + (key not in self._cache) > self._threshold:
                 self.purge()
-                if len(self._cache) + (not key in self._cache) > self._threshold:
+                if len(self._cache) + (key not in self._cache) > self._threshold:
                     return False
             else:
                 self.purge()
