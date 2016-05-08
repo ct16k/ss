@@ -58,7 +58,7 @@ class TrivialTemplate(object):
 
         # fill in blanks from default
         if templatename != self._deftmplname:
-            template = self._templates.get(self._deftmplname) or self.loadtemplate(self._deftmplname)
+            template = self.get(self._deftmplname)
         else:
             template = {}
         template.update(templateconfig)
@@ -83,15 +83,22 @@ class TrivialTemplate(object):
 
         return self._loadtemplate(templatename, tmplconfig)
 
+    def get(self, templatename):
+        return (self._templates.get(templatename) or self.loadtemplate(templatename))
+
+    def hastemplate(self, pagename, templatename = None):
+        templatename = templatename or self._deftmplname
+        return (pagename in self.get(templatename))
+
     def rendertemplate(self, pagename, templatename = None, **kwargs):
         templatename = templatename or self._deftmplname
-        template = (self._templates.get(templatename) or self.loadtemplate(templatename))[pagename]
+        template = self.get(templatename)[pagename]
 
         return render_template_string(template['template'], data = kwargs)
 
     def renderresponse(self, pagename, templatename = None, statuscode = None, **kwargs):
         templatename = templatename or self._deftmplname
-        template = (self._templates.get(templatename) or self.loadtemplate(templatename))[pagename]
+        template = self.get(templatename)[pagename]
 
         if not statuscode:
             statuscode = template['statuscode'] if ('statuscode' in template) else 200
@@ -100,6 +107,6 @@ class TrivialTemplate(object):
 
     def getmimetype(self, pagename, templatename = None):
         templatename = templatename or self._deftmplname
-        template = (self._templates.get(templatename) or self.loadtemplate(templatename))[pagename]
+        template = self.get(templatename)[pagename]
 
         return template['mimetype'] if ('mimetype' in template) else 'text/html'

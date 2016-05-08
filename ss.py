@@ -29,12 +29,18 @@ from os import getenv, getpid
 from threading import current_thread, local
 import logging
 import re
+import ipaddress
+import urllib2
 from Crypto import Random
-from flask import Flask, request, Response
+from flask import Flask, request, Response, g
 from werkzeug.routing import BaseConverter
 from keycache import KeyCache
 from trivialcache import TrivialCache
 from trivialtemplate import TrivialTemplate
+from datetime import datetime
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # default configuration
 DEBUG = False
@@ -63,7 +69,10 @@ EXTRASCOUNT = True
 ADMINIPS = [ '127.0.0.1' ]
 BLOCKEDUA = []
 
+EMAIL = None
+
 GENKEYS = 1
+GENMAXKEYS = 32
 GENKEYLEN = 16
 GENKEYCHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
 
@@ -77,18 +86,16 @@ builtintmpl = {
   </head>
   <body>
     <form action="{{ data.urlprefix }}://{{ data.host }}/set" method="post">
-      <table  style="border: 0; padding: 0; border-spacing: 0;">
+      <table style="border: 0; padding: 0; border-spacing: 0;">
         <tr>
           <td style="vertical-align: top;">
-            <dl>
+            <dl style="margin: 0; padding: 0">
               <dt>message:</dt>
-              <dd><textarea name="message" rows=5 cols=40 autofocus="autofocus"></textarea></dd>
-              <dt>extra:</dt>
-              <dd><input type="password" name="extra" size=30 /></dd>
+              <dd><textarea name="message" rows=6 cols=40 autofocus="autofocus"></textarea></dd>
             </dl>
           </td>
           <td style="vertical-align: top;">
-            <dl>
+            <dl style="margin: 0; padding: 0">
               <dt>copies:</dt>
               <dd><input type="text" name="copies" size=10 /></dd>
               <dt>views:</dt>
@@ -97,11 +104,26 @@ builtintmpl = {
           </td>
         </tr>
         <tr>
-          <td>
-            <input type="submit" value="Share" />
+          <td style="vertical-align: top;">
+            <dl style="margin: 0; padding: 0">
+              <dt>extra:</dt>
+              <dd><input type="password" name="extra" size=30 /></dd>
+            </dl>
           </td>
         </tr>
+          {%- if data.canemail %}
+        <tr>
+          <td style="vertical-align: top;">
+            <dl style="margin: 0; padding: 0">
+              <dt>email:</dt>
+              <dd><input type="text" name="email" size=40 /></dd>
+            </dl>
+          </td>
+        </tr>
+          {%- endif %}
       </table>
+      <br />
+      <input type="submit" value="Share" />
     </form>
   </body>
 </html>''',
@@ -168,6 +190,16 @@ builtintmpl = {
         'template': '''{{ data.errormsg }}''',
         'mimetype': 'text/plain'
     },
+    'mailsubject': {
+        'type': 'inline',
+        'template': '''{{ data.keycount }} message(s) on {{ data.host }} at {{ time_now() }}''',
+    },
+    'mailplain': {
+        'type': 'inline',
+        'template': '''{%- for keyid in data.keyids -%}
+{{ keyid }}
+{% endfor %}'''
+    },
     'adminmsg': {
         'type': 'inline',
         'template': '''{{ data.message }}''',
@@ -200,6 +232,30 @@ tls = local()
 tls.cache = None
 tls.template = None
 tls.uaregex = None
+tls.adminips = None
+tls.emailips = None
+
+def calc_subnets(subnets):
+    result = {}
+
+    for net in subnets:
+        net = ipaddress.ip_network(unicode(net, 'utf-8'))
+        mask = int(net.netmask)
+        if mask not in result:
+            result[mask] = []
+
+        result[mask].append(int(net.network_address))
+
+    return result
+
+def is_allowed(ipaddr, subnets):
+    ipaddr = int(ipaddress.ip_address(ipaddr))
+
+    for mask, nets in subnets.items():
+        if (ipaddr & mask) in nets:
+            return True
+
+    return False
 
 # regex mapper
 class RegexConverter(BaseConverter):
@@ -209,10 +265,12 @@ class RegexConverter(BaseConverter):
 
 app.url_map.converters['regex'] = RegexConverter
 
-def loaduaregexps():
-    if app.config['BLOCKEDUA']:
-        uaregex = []
+app.jinja_env.globals.update(time_now = lambda:datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
+def loaduaregexps():
+    uaregex = []
+
+    if app.config['BLOCKEDUA']:
         if isinstance(app.config['BLOCKEDUA'], list):
             uaiter = iter(app.config['BLOCKEDUA'])
         else:
@@ -224,7 +282,7 @@ def loaduaregexps():
             if app.config['DEBUG']:
                 print('block: ' + useragent.rstrip('\r\n'))
 
-        tls.uaregex = uaregex
+    return uaregex
 
 @app.before_first_request
 def before_first_request():
@@ -244,10 +302,17 @@ def before_first_request():
     if app.config['DEBUG']:
         print('init: %d %d' % (getpid(), current_thread().ident))
 
-    loaduaregexps()
-
     tls.cache = KeyCache(app.config)
     tls.template = TrivialTemplate(app.config)
+
+    tls.adminips = calc_subnets(app.config['ADMINIPS'] or [])
+    if app.config['DEBUG']:
+        print('adminips: ' + str(tls.adminips))
+    tls.uaregex = loaduaregexps()
+
+    if app.config['EMAIL']:
+        tls.emailips = calc_subnets(app.config['EMAIL']['allowed'] or [])
+        print('emailips: ' + str(tls.emailips))
 
 @app.route('/', methods = ['GET', 'POST'])
 def index():
@@ -257,7 +322,8 @@ def index():
     if app.config['DEBUG']:
         print('templatename: ' + templatename)
 
-    return tls.template.renderresponse('index', templatename, host = request.host, urlprefix = app.config['URLPREFIX'])
+    return tls.template.renderresponse('index', templatename, host = request.host, urlprefix = app.config['URLPREFIX'],
+        canemail = g.canemail)
 
 def get_form(arg, templatename = app.config['TEMPLATENAME']):
     return tls.template.renderresponse('getform', templatename, host = request.host, urlprefix = app.config['URLPREFIX'], msgid = arg)
@@ -290,7 +356,7 @@ def get_key(arg):
                 return tls.template.renderresponse('blockget', templatename, msgid = arg, errormsg = 'Mhh')
 
     message, err = tls.cache.get(arg, extra)
-    if message:
+    if not err:
         return tls.template.renderresponse('getkey', templatename, msgid = arg, message = message)
     else:
         errmsg = {
@@ -326,6 +392,81 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS'], templatename = 
         }
         return tls.template.rendertemplate('seterror', templatename, error = err, errormsg = errmsg.get(err, '?'))
 
+def mail_keys(templatename, host, emails, keyids, copies, views):
+    smtpopts = {}
+    if 'host' in app.config['EMAIL']:
+        smtpopts['host'] = app.config['EMAIL']['host']
+    if 'port' in app.config['EMAIL']:
+        smtpopts['port'] = app.config['EMAIL']['port']
+    if 'hostname' in app.config['EMAIL']:
+        smtpopts['hostname'] = app.config['EMAIL']['hostname']
+
+    if ('ssl' in app.config['EMAIL']) and (app.config['EMAIL']['ssl'] == True):
+        if 'keyfile' in app.config['EMAIL']:
+            smtpopts['keyfile'] = app.config['EMAIL']['keyfile']
+        if 'certfile' in app.config['EMAIL']:
+            smtpopts['certfile'] = app.config['EMAIL']['certfile']
+
+        smtp = smtplib.SMTP_SSL(**smtpopts)
+        if 'host' not in app.config['EMAIL']:
+            smtp.connect()
+    else:
+        smtp = smtplib.SMTP(**smtpopts)
+        if 'host' not in app.config['EMAIL']:
+            smtp.connect()
+
+        if ('starttls' in app.config['EMAIL']) and (app.config['EMAIL']['starttls'] == True):
+            smtpopts = {}
+
+            if 'keyfile' in app.config['EMAIL']:
+                smtpopts['keyfile'] = app.config['EMAIL']['keyfile']
+            if 'certfile' in app.config['EMAIL']:
+                smtpopts['certfile'] = app.config['EMAIL']['certfile']
+
+            smtp.starttls(**smtpopts)
+
+    if ('user' in app.config['EMAIL']) and ('password' in app.config['EMAIL']):
+        smtp.login(app.config['EMAIL']['user'], app.config['EMAIL']['password'])
+
+    sender = app.config['EMAIL']['from']
+    result = {}
+
+    for to in emails:
+        if tls.template.hastemplate('mailplain', templatename):
+            msgplain = MIMEText(tls.template.rendertemplate('mailplain', templatename, host = host, urlprefix = app.config['URLPREFIX'], sender = sender, to = to, keyids = keyids), 'plain')
+        else:
+            msgplain = None
+
+        if tls.template.hastemplate('mailhtml', templatename):
+            msghtml = MIMEText(tls.template.rendertemplate('mailhtml', templatename, host = host, urlprefix = app.config['URLPREFIX'], sender = sender, to = to, keyids = keyids), 'html')
+        else:
+            msghtml = None
+
+        if msgplain and msghtml:
+            msg = msg = MIMEMultipart('alternative')
+            msg.attach(msgplain)
+            msg.attach(msghtml)
+        else:
+            msg = msgplain or msghtml
+
+        if sender:
+            msg['From'] = sender
+        msg['To'] = to
+        msg['Subject'] = tls.template.rendertemplate('mailsubject', templatename, host = host, urlprefix = app.config['URLPREFIX'], sender = sender, to = to, keycount = len(keyids))
+
+        if (app.config['DEBUG']):
+            print(msg.as_string())
+
+        try:
+            smtp.sendmail(sender, [to], msg.as_string())
+        except smtplib.SMTPRecipientsRefused as e:
+            result.update(e.recipients)
+        except smtplib.SMTPException as e:
+            result[to] = e.smtp_error
+
+    smtp.quit()
+    return result
+
 @app.route('/set/', methods = ['POST'])
 @app.route('/set', methods = ['POST'])
 def set_keys():
@@ -345,6 +486,8 @@ def set_keys():
     elif (views > app.config['MAXVIEWS']):
         views = app.config['MAXVIEWS']
 
+    email = re.split('[,;\s]*', request.form.get('email', '').encode('utf-8'))
+
     templatename = request.values.get('template', app.config['TEMPLATENAME'])
     if (templatename.lower() == 'none'):
         templatename = app.config['DEFAULTTEMPLATE']
@@ -352,35 +495,59 @@ def set_keys():
     if app.config['DEBUG']:
         print('message: ' + message)
         print('messagelen: ' + str(msglen))
-        print('extra: ' + str(extra))
+        print('extra: ' + extra)
         print('copies: ' + str(copies))
         print('views: ' + str(views))
+        print('email: ' + email)
         print('templatename: ' + templatename)
 
     result = [set_key(message, extra, views, templatename) for _ in xrange(copies)]
-    return tls.template.renderresponse('setkeys', templatename, keyids = result, copies = copies, views = views)
 
-def gen_key(keycharslen, keylen, copies, views, extra = '', templatename = app.config['TEMPLATENAME']):
+    if app.config['EMAIL'] and email and g.canemail:
+        mailres = mail_keys(templatename, request.host, email, result, copies, views)
+    else:
+        mailres = None
+
+    return tls.template.renderresponse('setkeys', templatename, keyids = result, copies = copies, views = views, mailres = mailres)
+
+def gen_key(keycharslen, keylen, copies, views, extra = '', templatename = app.config['TEMPLATENAME'], email = None):
     genkey = ''.join([app.config['GENKEYCHARS'][ord(c) % keycharslen] for c in Random.new().read(keylen)])
 
     result = [set_key(genkey, extra, views, templatename) for _ in xrange(copies)]
-    return tls.template.rendertemplate('genkey', templatename, keyids = result, keylen = keylen, copies = copies, views = views)
+    if email:
+        mailres = mail_keys(templatename, request.host, email, result, copies, views)
+    else:
+        mailres = None
+
+    return tls.template.rendertemplate('genkey', templatename, keyids = result, keylen = keylen, copies = copies, views = views, mailres = mailres)
 
 @app.route('/gen/', methods = ['GET', 'POST'], defaults = {'count': None, 'keylen': None, 'copies': None, 'views': None})
 @app.route('/gen', methods = ['GET', 'POST'], defaults = {'count': None, 'keylen': None, 'copies': None, 'views': None})
-@app.route('/gen/<int:count>/', methods = ['GET', 'POST'], defaults = {'keylen': None, 'copies': None, 'views': None})
-@app.route('/gen/<int:count>', methods = ['GET', 'POST'], defaults = {'keylen': None, 'copies': None, 'views': None})
-@app.route('/gen/<int:count>/<int:keylen>/', methods = ['GET', 'POST'], defaults = {'copies': None, 'views': None})
-@app.route('/gen/<int:count>/<int:keylen>', methods = ['GET', 'POST'], defaults = {'copies': None, 'views': None})
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/', methods = ['GET', 'POST'], defaults = {'views': None})
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>', methods = ['GET', 'POST'], defaults = {'views': None})
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>/', methods = ['GET', 'POST'])
-@app.route('/gen/<int:count>/<int:keylen>/<int:copies>/<int:views>', methods = ['GET', 'POST'])
+@app.route('/gen/<count>/', methods = ['GET', 'POST'], defaults = {'keylen': None, 'copies': None, 'views': None})
+@app.route('/gen/<count>', methods = ['GET', 'POST'], defaults = {'keylen': None, 'copies': None, 'views': None})
+@app.route('/gen/<count>/<int:keylen>/', methods = ['GET', 'POST'], defaults = {'copies': None, 'views': None})
+@app.route('/gen/<count>/<int:keylen>', methods = ['GET', 'POST'], defaults = {'copies': None, 'views': None})
+@app.route('/gen/<count>/<int:keylen>/<int:copies>/', methods = ['GET', 'POST'], defaults = {'views': None})
+@app.route('/gen/<count>/<int:keylen>/<int:copies>', methods = ['GET', 'POST'], defaults = {'views': None})
+@app.route('/gen/<count>/<int:keylen>/<int:copies>/<int:views>/', methods = ['GET', 'POST'])
+@app.route('/gen/<count>/<int:keylen>/<int:copies>/<int:views>', methods = ['GET', 'POST'])
 def gen_keys(count, keylen, copies, views):
     if not count:
-        count = request.values.get('count', app.config['GENKEYS'], type = int)
-        if not count or (count < 1):
+        count = urllib2.unquote(request.values.get('count', app.config['GENKEYS']))
+        if not count:
             count = app.config['GENKEYS']
+    if '@' in count:
+        count = re.split(';+\s*', count)
+        if not(app.config['EMAIL'] and g.canemail):
+            count = len(count)
+    else:
+        count = int(count)
+
+    if isinstance(count, int):
+        if count < 1:
+            count = app.config['GENKEYS']
+        elif count > app.config['GENMAXKEYS']:
+            count = app.config['GENMAXKEYS']
 
     if not keylen:
         keylen = request.values.get('keylen', app.config['GENKEYLEN'], type = int)
@@ -421,11 +588,11 @@ def gen_keys(count, keylen, copies, views):
         print('keycharslen: ' + str(keycharslen))
         print('templatename: ' + templatename)
 
-    result = [gen_key(keycharslen, keylen, copies, views, extra, templatename) for _ in xrange(count)]
+    if isinstance(count, int):
+        result = [gen_key(keycharslen, keylen, copies, views, extra, templatename) for _ in xrange(count)]
+    else:
+        result = [gen_key(keycharslen, keylen, copies, views, extra, templatename, re.split(',+\s*', email)) for email in count]
     return tls.template.renderresponse('genkeys', templatename, keyids = result, count = count, keylen = keylen, copies = copies, views = views)
-
-def is_admin(ipaddr):
-    return ipaddr in app.config['ADMINIPS']
 
 @app.route('/admin/<regex("clearcache|reload(tmpl|ua)"):command>', methods = ['GET', 'POST'])
 @app.route('/admin/<regex("clearcache|reload(tmpl|ua)"):command>/<param>', methods = ['GET', 'POST'])
@@ -439,7 +606,7 @@ def admin_cmds(command = '', param = ''):
         print('param: ' + param)
         print('templatename: ' + templatename)
 
-    if not is_admin(request.remote_addr):
+    if not g.isadmin:
         return tls.template.renderresponse('adminerror', templatename, 403, errormsg = "Access denied")
 
     if command == 'clearcache':
@@ -471,7 +638,13 @@ def before_request():
     elif 'X-Real-Ip' in request.headers:
         route = request.headers.getlist('X-Real-Ip')
     if route:
-        logger.info("accessroute: " + ', '.join(route[-4:]))
+        logger.info("accessroute: " + ', '.join(route))
+        g.remoteaddr = route[-1]
+    else:
+        g.remoteaddr = unicode(request.remote_addr,'utf-8')
+
+    g.isadmin = is_allowed(g.remoteaddr, tls.adminips)
+    g.canemail = app.config['EMAIL'] and is_allowed(g.remoteaddr, tls.emailips)
 
     logger.info('useragent: ' + request.user_agent.string)
 
