@@ -1,0 +1,21 @@
+Hello,
+
+This is your friendly neighborhood automatically sent mail, letting you know
+someone shared something with you{% if not data.note %}.{% else %} with the following note:
+{{ data.note }}{% endif %}
+
+To view the data, click the following link{% if data.copies > 1 %}s{% endif %}:{% for keyid, err in data.keyids %}
+{% if keyid is defined -%}{{ keyid }}{% endif -%}
+{% endfor %}
+
+Please note that {% if data.copies > 1 %}these links{% else %}this link{% endif %} can be viewed {% if data.views > 1 %}{{ data.views }} times{% else %}ONLY ONE TIME{% endif %} before being removed.
+After {{ data.expires }} the data will be automatically expired.
+
+Please make sure you retrieve the shared information in due time. If additional
+validation required, you will receive the necessary data by other means.
+
+
+Regards,
+
+-- 
+{{ data.sender }}

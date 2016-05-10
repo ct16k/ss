@@ -38,5 +38,8 @@
     },
     "mailplain": {
         "template": "templates/simple/mailplain.txt"
+    },
+    "mailhtml": {
+        "template": "templates/simple/mailhtml.html"
     }
 }
