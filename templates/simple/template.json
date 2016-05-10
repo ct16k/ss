@@ -13,7 +13,7 @@
     },
     "setkey": {
         "type": "inline",
-        "template": "{{ data.urlprefix }}://{{ data.host }}/get/{{ data.extra }}{{ data.keyid|e }}<br />",
+        "template": "{{ data.urlprefix }}://{{ data.host }}/get/{{ data.extra }}{{ data.keyid|e }}",
         "mimetype": "text/html"
     },
     "setkeys": {
@@ -32,9 +32,11 @@
         "template": "templates/simple/geterror.html",
         "mimetype": "text/html"
     },
-    "seterror": {
+    "mailsubject": {
         "type": "inline",
-        "template": "<span style=\"color: Crimson;\">{{ data.error }} - {{ data.errormsg }}</span><br />",
-        "mimetype": "text/html"
+        "template": "{{ data.keycount }} message(s) on {{ data.host }} at {{ time_now() }}"
+    },
+    "mailplain": {
+        "template": "templates/simple/mailplain.txt"
     }
 }

@@ -23,7 +23,7 @@
       <tr>
         <td />
         <td align=center>
-          count: {{ data.count }}
+          count: {%- if data.count is number -%}{{ data.count }}{%- else -%}{{ data.count|length }}{%- endif -%}
         </td>
         <td align=center>
           copies: {{ data.copies }}

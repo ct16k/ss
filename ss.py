@@ -37,7 +37,7 @@ from werkzeug.routing import BaseConverter
 from keycache import KeyCache
 from trivialcache import TrivialCache
 from trivialtemplate import TrivialTemplate
-from datetime import datetime
+from datetime import datetime, timedelta
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -111,7 +111,7 @@ builtintmpl = {
             </dl>
           </td>
         </tr>
-          {%- if data.canemail %}
+        {%- if data.canemail %}
         <tr>
           <td style="vertical-align: top;">
             <dl style="margin: 0; padding: 0">
@@ -120,7 +120,15 @@ builtintmpl = {
             </dl>
           </td>
         </tr>
-          {%- endif %}
+        <tr>
+          <td style="vertical-align: top;">
+            <dl style="margin: 0; padding: 0">
+              <dt>email note:</dt>
+              <dd><textarea name="note" rows=3 cols=40></textarea></dd>
+            </dl>
+          </td>
+        </tr>
+        {%- endif %}
       </table>
       <br />
       <input type="submit" value="Share" />
@@ -137,12 +145,13 @@ builtintmpl = {
   </head>
   <body>
     <form action="{{ data.urlprefix }}://{{ data.host }}/get/" method="post">
-      <dl>
+      <dl style="margin: 0; padding: 0">
         <dt>id:</dt>
         <dd><input type="text" name="arg" size=60 value="{{ data.msgid }}"/></dd>
         <dt>extra:</dt>
         <dd><input type="password" name="extra" size=30 /></dd>
       </dl>
+      <br />
       <input type="submit" value="Retrieve" />
     </form>
   </body>
@@ -161,16 +170,26 @@ builtintmpl = {
     },
     'setkeys': {
         'type': 'inline',
-        'template': '''{%- for keyid in data.keyids -%}
-{{ keyid }}
-{% endfor %}''',
+        'template': '''{%- for keyid, err in data.keyids -%}
+{% if keyid is defined %}{{ keyid }}{% else %}{{ err.errmsg }}{% endif %}
+{% endfor %}
+{%- if data.mailres -%}
+    {%- for to, (errcode, errmsg) in data.mailres.items() -%}
+{{ to }}: {{ errcode }} - {{ errmsg }}
+    {%- endfor -%}
+{%- endif %}''',
         'mimetype': 'text/plain'
     },
     'genkey': {
         'type': 'inline',
-        'template': '''{%- for keyid in data.keyids -%}
-{{ keyid }}
-{% endfor %}''',
+        'template': '''{%- for keyid, err in data.keyids -%}
+{% if keyid is defined %}{{ keyid }}{% else %}{{ err.errmsg }}{% endif %}
+{% endfor %}
+{%- if data.mailres -%}
+    {%- for to, (errcode, errmsg) in data.mailres.items() -%}
+{{ to }}: {{ errcode }} - {{ errmsg }}
+    {%- endfor -%}
+{%- endif %}''',
         'mimetype': 'text/plain'
     },
     'genkeys': {
@@ -185,19 +204,18 @@ builtintmpl = {
         'template': '''{{ data.errormsg }}''',
         'mimetype': 'text/plain'
     },
-    'seterror': {
-        'type': 'inline',
-        'template': '''{{ data.errormsg }}''',
-        'mimetype': 'text/plain'
-    },
     'mailsubject': {
         'type': 'inline',
         'template': '''{{ data.keycount }} message(s) on {{ data.host }} at {{ time_now() }}''',
     },
     'mailplain': {
         'type': 'inline',
-        'template': '''{%- for keyid in data.keyids -%}
-{{ keyid }}
+        'template': '''{%- if data.note -%}
+{{ data.note }}
+
+{% endif -%}
+{%- for keyid, err in data.keyids -%}
+{% if keyid is defined %}{{ keyid }}{% else %}{{ err.errmsg }}{% endif %}
 {% endfor %}'''
     },
     'adminmsg': {
@@ -312,7 +330,8 @@ def before_first_request():
 
     if app.config['EMAIL']:
         tls.emailips = calc_subnets(app.config['EMAIL']['allowed'] or [])
-        print('emailips: ' + str(tls.emailips))
+        if app.config['DEBUG']:
+            print('emailips: ' + str(tls.emailips))
 
 @app.route('/', methods = ['GET', 'POST'])
 def index():
@@ -385,14 +404,14 @@ def set_key(message, extra = '', views = app.config['DEFVIEWS'], templatename = 
             extraflag = '?'
         else:
             extraflag = ''
-        return tls.template.rendertemplate('setkey', templatename, host = request.host, urlprefix = app.config['URLPREFIX'], keyid = urlkey, extra = extraflag, views = views)
+        return tls.template.rendertemplate('setkey', templatename, host = request.host, urlprefix = app.config['URLPREFIX'], keyid = urlkey, extra = extraflag, views = views), None
     else:
         errmsg = {
             tls.cache.ERROR_CACHE_NOTSET: 'No set'
         }
-        return tls.template.rendertemplate('seterror', templatename, error = err, errormsg = errmsg.get(err, '?'))
+        return None, {'errnum': err, 'errmsg': errmsg.get(err, '?')}
 
-def mail_keys(templatename, host, emails, keyids, copies, views):
+def mail_keys(templatename, host, emails, keyids, copies, views, emailnote):
     smtpopts = {}
     if 'host' in app.config['EMAIL']:
         smtpopts['host'] = app.config['EMAIL']['host']
@@ -432,13 +451,20 @@ def mail_keys(templatename, host, emails, keyids, copies, views):
     result = {}
 
     for to in emails:
+        if '@' not in to:
+            continue
+
+        expires = str(timedelta(seconds=app.config['TIMEOUT']))
+
         if tls.template.hastemplate('mailplain', templatename):
-            msgplain = MIMEText(tls.template.rendertemplate('mailplain', templatename, host = host, urlprefix = app.config['URLPREFIX'], sender = sender, to = to, keyids = keyids), 'plain')
+            msgplain = MIMEText(tls.template.rendertemplate('mailplain', templatename, host = host, urlprefix = app.config['URLPREFIX'],
+                sender = sender, to = to, keyids = keyids, copies = copies, views = views, expires = expires, note = emailnote), 'plain')
         else:
             msgplain = None
 
         if tls.template.hastemplate('mailhtml', templatename):
-            msghtml = MIMEText(tls.template.rendertemplate('mailhtml', templatename, host = host, urlprefix = app.config['URLPREFIX'], sender = sender, to = to, keyids = keyids), 'html')
+            msghtml = MIMEText(tls.template.rendertemplate('mailhtml', templatename, host = host, urlprefix = app.config['URLPREFIX'],
+                sender = sender, to = to, keyids = keyids, copies = copies, views = views, expires = expires, note = emailnote), 'html')
         else:
             msghtml = None
 
@@ -462,7 +488,10 @@ def mail_keys(templatename, host, emails, keyids, copies, views):
         except smtplib.SMTPRecipientsRefused as e:
             result.update(e.recipients)
         except smtplib.SMTPException as e:
-            result[to] = e.smtp_error
+            if 'smtp_error' in e:
+                result[to] = e.smtp_error
+            else:
+                result[to] = 'Ugh'
 
     smtp.quit()
     return result
@@ -487,6 +516,7 @@ def set_keys():
         views = app.config['MAXVIEWS']
 
     email = re.split('[,;\s]*', request.form.get('email', '').encode('utf-8'))
+    emailnote = request.form.get('note', '').encode('utf-8')
 
     templatename = request.values.get('template', app.config['TEMPLATENAME'])
     if (templatename.lower() == 'none'):
@@ -498,24 +528,25 @@ def set_keys():
         print('extra: ' + extra)
         print('copies: ' + str(copies))
         print('views: ' + str(views))
-        print('email: ' + email)
+        print('email: ' + str(email))
+        print('note: ' + emailnote)
         print('templatename: ' + templatename)
 
     result = [set_key(message, extra, views, templatename) for _ in xrange(copies)]
 
     if app.config['EMAIL'] and email and g.canemail:
-        mailres = mail_keys(templatename, request.host, email, result, copies, views)
+        mailres = mail_keys(templatename, request.host, email, result, copies, views, emailnote)
     else:
         mailres = None
 
     return tls.template.renderresponse('setkeys', templatename, keyids = result, copies = copies, views = views, mailres = mailres)
 
-def gen_key(keycharslen, keylen, copies, views, extra = '', templatename = app.config['TEMPLATENAME'], email = None):
+def gen_key(keycharslen, keylen, copies, views, extra = '', templatename = app.config['TEMPLATENAME'], email = None, emailnote = None):
     genkey = ''.join([app.config['GENKEYCHARS'][ord(c) % keycharslen] for c in Random.new().read(keylen)])
 
     result = [set_key(genkey, extra, views, templatename) for _ in xrange(copies)]
     if email:
-        mailres = mail_keys(templatename, request.host, email, result, copies, views)
+        mailres = mail_keys(templatename, request.host, email, result, copies, views, emailnote)
     else:
         mailres = None
 
@@ -576,12 +607,15 @@ def gen_keys(count, keylen, copies, views):
 
     extra = request.values.get('extra', '').encode('utf-8')
 
+    emailnote = request.values.get('note', '').encode('utf-8')
+
     templatename = request.values.get('template', app.config['TEMPLATENAME'])
     if (templatename.lower() == 'none'):
         templatename = app.config['DEFAULTTEMPLATE']
 
     if app.config['DEBUG']:
         print('count: ' + str(count))
+        print('note: ' + emailnote)
         print('keylen: ' + str(keylen))
         print('copies: ' + str(copies))
         print('views: ' + str(views))
@@ -591,7 +625,7 @@ def gen_keys(count, keylen, copies, views):
     if isinstance(count, int):
         result = [gen_key(keycharslen, keylen, copies, views, extra, templatename) for _ in xrange(count)]
     else:
-        result = [gen_key(keycharslen, keylen, copies, views, extra, templatename, re.split(',+\s*', email)) for email in count]
+        result = [gen_key(keycharslen, keylen, copies, views, extra, templatename, re.split(',+\s*', email), emailnote) for email in count]
     return tls.template.renderresponse('genkeys', templatename, keyids = result, count = count, keylen = keylen, copies = copies, views = views)
 
 @app.route('/admin/<regex("clearcache|reload(tmpl|ua)"):command>', methods = ['GET', 'POST'])

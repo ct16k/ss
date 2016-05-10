@@ -32,10 +32,15 @@
         <td colspan=2>
           <p style="border: 1px solid; border-radius: 16px; border-color: Gainsboro; padding: 16px; font-family: monospace; text-align: right;">
             {%- set index = 1 -%}
-            {%- for keyid in data.keyids %}
-            {{ index }}&nbsp;<span  class="selectable">{{ keyid }}</span>
-            {%- set index = index + 1 -%}
+            {%- for keyid, err in data.keyids %}
+            {{ index }}&nbsp;{% if keyid is defined %}<span  class="selectable">{{ keyid }}</span>{% else %}<span style="color: Crimson;">{{ err.errnum }} - {{ err.errmsg }}</span>{% endif %}<br />
+              {%- set index = index + 1 -%}
             {%- endfor %}
+            {%- if data.mailres -%}
+              {%- for to, (errcode, errmsg) in data.mailres.items() %}
+            <span style="color: Crimson;">{{ to }}: {{ errcode }} - {{ errmsg }}</span><br />
+              {%- endfor %}
+            {%- endif %}
           </p>
         </td>
       </tr>

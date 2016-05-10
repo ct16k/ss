@@ -23,9 +23,21 @@
             <input type="text" name="views" style="width: 100%;" placeholder="views per copy"/>
           </td>
         </tr>
+        {%- if data.canemail %}
         <tr>
           <td colspan=2>
-            <input type="submit" style="width: 100%;" value="Share" />
+            <br /><input type="text" name="email" style="width: 100%;" placeholder="email recipients"/>
+          </td>
+        </tr>
+        <tr>
+          <td colspan=2>
+            <textarea name="note" rows=3 style="width: 100%;" autofocus="autofocus" placeholder="email note"></textarea>
+          </td>
+        </tr>
+        {%- endif %}
+        <tr>
+          <td colspan=2>
+            <br /><input type="submit" style="width: 100%;" value="Share" />
           </td>
         </tr>
       </table>
