@@ -672,7 +672,9 @@ def before_request():
     elif 'X-Real-Ip' in request.headers:
         route = request.headers.getlist('X-Real-Ip')
     if route:
-        logger.info("accessroute: " + ', '.join(route))
+        logger.info('accessroute: ' + ', '.join(route))
+        if app.config['DEBUG']:
+            print('accessroute: ' + ', '.join(route))
         g.remoteaddr = route[-1]
     else:
         g.remoteaddr = unicode(request.remote_addr,'utf-8')
@@ -681,6 +683,8 @@ def before_request():
     g.canemail = app.config['EMAIL'] and is_allowed(g.remoteaddr, tls.emailips)
 
     logger.info('useragent: ' + request.user_agent.string)
+    if app.config['DEBUG']:
+        print('useragent: ' + request.user_agent.string)
 
 if __name__ == '__main__':
     app.run(host = app.config['LISTENADDR'], port = app.config['LISTENPORT'], debug = app.config['DEBUG'])
